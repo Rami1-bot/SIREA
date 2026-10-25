@@ -1,0 +1,33 @@
+.env
+.env.*
+!.env.example
+*.respaldo
+*.bak
+*.crt
+*.pem
+*.key
+.git
+__pycache__
+*.pyc
+credentials/*
+!credentials/.gitkeep
+storage/*
+!storage/**/.gitkeep
+*.zip
+venv
+.venv
+certs/*
+!certs/.gitkeep
+
+# Cualquier copia o respaldo del .env (tienen secretos) y archivos de apoyo: nunca dentro de la imagen
+.env.*
+!.env.example
+*.respaldo
+*.bak
+*.old
+caddy-root.crt
+docker-compose.yml.*
+
+# Secretos de Streamlit Cloud y su salida generada
+.streamlit/secrets.toml
+secretos_para_streamlit*.txt

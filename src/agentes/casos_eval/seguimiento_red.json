@@ -1,0 +1,655 @@
+{
+ "skill": "seguimiento_red",
+ "descripcion": "Casos ficticios (redes y centros inventados) que una persona de la OIIS resolvió a mano. Las horas de acciones previas son relativas al momento de la prueba.",
+ "casos": [
+  {
+   "id": "S01",
+   "titulo": "Faltan 2 centros y el corte es mañana",
+   "por_que": "Caso básico: hay que recordar con los centros exactos.",
+   "expediente": {
+    "tipo_caso": "red",
+    "caso_id": "red:RED EVAL NORTE",
+    "red": "RED EVAL NORTE",
+    "anio": 2026,
+    "semana": 40,
+    "horas_al_corte": 20,
+    "centros_esperados": 6,
+    "recibidos": 4,
+    "porcentaje": 66.7,
+    "faltantes": [
+     "CAP EVAL ALFA",
+     "POLICLINICO EVAL BETA"
+    ],
+    "acciones_previas": [],
+    "memoria": [],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": false,
+    "historial_semanas_previas": [
+     {
+      "semana": 37,
+      "porcentaje": 100
+     },
+     {
+      "semana": 38,
+      "porcentaje": 100
+     },
+     {
+      "semana": 39,
+      "porcentaje": 100
+     }
+    ]
+   },
+   "espera": {
+    "alguno_de": [
+     "RECORDATORIO_RED"
+    ],
+    "ninguno_de": [
+     "ESCALAR"
+    ]
+   }
+  },
+  {
+   "id": "S02",
+   "titulo": "La red avisó un corte de internet (memoria)",
+   "por_que": "Una regla no lee la memoria: con el corte a 12 h recordaría a una red que ya avisó que envía hoy antes del corte.",
+   "expediente": {
+    "tipo_caso": "red",
+    "caso_id": "red:RED EVAL ANDES",
+    "red": "RED EVAL ANDES",
+    "anio": 2026,
+    "semana": 40,
+    "horas_al_corte": 12,
+    "centros_esperados": 5,
+    "recibidos": 2,
+    "porcentaje": 40.0,
+    "faltantes": [
+     "CAP EVAL GAMMA",
+     "CAP EVAL DELTA",
+     "HOSPITAL EVAL EPSILON"
+    ],
+    "acciones_previas": [],
+    "memoria": [
+     {
+      "nota": "La red avisó por correo que esta semana no tiene internet en la sede; enviará hoy por la tarde, antes del corte.",
+      "desde": "2026-10-19",
+      "fuente": "humano"
+     }
+    ],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": false,
+    "historial_semanas_previas": [
+     {
+      "semana": 38,
+      "porcentaje": 100
+     },
+     {
+      "semana": 39,
+      "porcentaje": 100
+     }
+    ]
+   },
+   "espera": {
+    "alguno_de": [
+     "SIN_ACCION"
+    ],
+    "ninguno_de": [
+     "RECORDATORIO_RED"
+    ]
+   }
+  },
+  {
+   "id": "S03",
+   "titulo": "Dos recordatorios sin ningún avance",
+   "por_que": "Insistir por correo ya no funciona: corresponde escalar, no un tercer correo.",
+   "expediente": {
+    "tipo_caso": "red",
+    "caso_id": "red:RED EVAL SUR",
+    "red": "RED EVAL SUR",
+    "anio": 2026,
+    "semana": 40,
+    "horas_al_corte": -5,
+    "centros_esperados": 4,
+    "recibidos": 1,
+    "porcentaje": 25.0,
+    "faltantes": [
+     "CAP EVAL ZETA",
+     "CAP EVAL ETA",
+     "CAP EVAL THETA"
+    ],
+    "acciones_previas": [
+     {
+      "tipo": "RECORDATORIO_RED",
+      "estado": "EJECUTADA",
+      "semana": 40,
+      "hace_horas": 30,
+      "recibidos_al_proponer": 1
+     },
+     {
+      "tipo": "RECORDATORIO_RED",
+      "estado": "EJECUTADA",
+      "semana": 40,
+      "hace_horas": 54,
+      "recibidos_al_proponer": 1
+     }
+    ],
+    "memoria": [],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": false,
+    "historial_semanas_previas": [
+     {
+      "semana": 38,
+      "porcentaje": 75
+     },
+     {
+      "semana": 39,
+      "porcentaje": 50
+     }
+    ]
+   },
+   "espera": {
+    "alguno_de": [
+     "ESCALAR"
+    ],
+    "ninguno_de": [
+     "RECORDATORIO_RED"
+    ]
+   }
+  },
+  {
+   "id": "S04",
+   "titulo": "La red pidió cambiar su contraseña",
+   "por_que": "Si no puede entrar al portal, recordarle es inútil: hay que verificar el acceso.",
+   "expediente": {
+    "tipo_caso": "red",
+    "caso_id": "red:RED EVAL CENTRO",
+    "red": "RED EVAL CENTRO",
+    "anio": 2026,
+    "semana": 40,
+    "horas_al_corte": 10,
+    "centros_esperados": 3,
+    "recibidos": 0,
+    "porcentaje": 0.0,
+    "faltantes": [
+     "HOSPITAL EVAL IOTA",
+     "CAP EVAL KAPPA",
+     "CAP EVAL LAMBDA"
+    ],
+    "acciones_previas": [],
+    "memoria": [],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": true,
+    "historial_semanas_previas": [
+     {
+      "semana": 38,
+      "porcentaje": 100
+     },
+     {
+      "semana": 39,
+      "porcentaje": 100
+     }
+    ]
+   },
+   "espera": {
+    "alguno_de": [
+     "ESCALAR"
+    ],
+    "ninguno_de": [
+     "RECORDATORIO_RED"
+    ]
+   }
+  },
+  {
+   "id": "S05",
+   "titulo": "Ya se le recordó hace 6 horas",
+   "por_que": "No repetir mensajes.",
+   "expediente": {
+    "tipo_caso": "red",
+    "caso_id": "red:RED EVAL ESTE",
+    "red": "RED EVAL ESTE",
+    "anio": 2026,
+    "semana": 40,
+    "horas_al_corte": 14,
+    "centros_esperados": 4,
+    "recibidos": 3,
+    "porcentaje": 75.0,
+    "faltantes": [
+     "CAP EVAL MU"
+    ],
+    "acciones_previas": [
+     {
+      "tipo": "RECORDATORIO_RED",
+      "estado": "EJECUTADA",
+      "semana": 40,
+      "hace_horas": 6,
+      "recibidos_al_proponer": 2
+     }
+    ],
+    "memoria": [],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": false,
+    "historial_semanas_previas": [
+     {
+      "semana": 39,
+      "porcentaje": 100
+     }
+    ]
+   },
+   "espera": {
+    "alguno_de": [
+     "SIN_ACCION"
+    ],
+    "ninguno_de": [
+     "RECORDATORIO_RED",
+     "ESCALAR"
+    ]
+   }
+  },
+  {
+   "id": "S06",
+   "titulo": "Faltan 4 días y la red siempre cumple",
+   "por_que": "Un correo tan temprano es ruido.",
+   "expediente": {
+    "tipo_caso": "red",
+    "caso_id": "red:RED EVAL OESTE",
+    "red": "RED EVAL OESTE",
+    "anio": 2026,
+    "semana": 41,
+    "horas_al_corte": 100,
+    "centros_esperados": 5,
+    "recibidos": 1,
+    "porcentaje": 20.0,
+    "faltantes": [
+     "CAP EVAL NU",
+     "CAP EVAL XI",
+     "CAP EVAL OMICRON",
+     "CAP EVAL PI"
+    ],
+    "acciones_previas": [],
+    "memoria": [],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": false,
+    "historial_semanas_previas": [
+     {
+      "semana": 38,
+      "porcentaje": 100
+     },
+     {
+      "semana": 39,
+      "porcentaje": 100
+     },
+     {
+      "semana": 40,
+      "porcentaje": 100
+     }
+    ]
+   },
+   "espera": {
+    "alguno_de": [
+     "SIN_ACCION"
+    ],
+    "ninguno_de": [
+     "RECORDATORIO_RED",
+     "ESCALAR"
+    ]
+   }
+  },
+  {
+   "id": "S07",
+   "titulo": "Corte vencido hace un día, sin avisos previos",
+   "por_que": "Recordatorio de atraso con los centros exactos.",
+   "expediente": {
+    "tipo_caso": "red",
+    "caso_id": "red:RED EVAL COSTA",
+    "red": "RED EVAL COSTA",
+    "anio": 2026,
+    "semana": 40,
+    "horas_al_corte": -22,
+    "centros_esperados": 7,
+    "recibidos": 6,
+    "porcentaje": 85.7,
+    "faltantes": [
+     "CAP EVAL RHO"
+    ],
+    "acciones_previas": [],
+    "memoria": [],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": false,
+    "historial_semanas_previas": [
+     {
+      "semana": 38,
+      "porcentaje": 100
+     },
+     {
+      "semana": 39,
+      "porcentaje": 100
+     }
+    ]
+   },
+   "espera": {
+    "alguno_de": [
+     "RECORDATORIO_RED"
+    ],
+    "ninguno_de": []
+   }
+  },
+  {
+   "id": "S08",
+   "titulo": "Memoria vencida no impide recordar tras el corte",
+   "por_que": "La nota explicaba el atraso, pero el corte ya pasó: se recuerda con tono comprensivo.",
+   "expediente": {
+    "tipo_caso": "red",
+    "caso_id": "red:RED EVAL SELVA",
+    "red": "RED EVAL SELVA",
+    "anio": 2026,
+    "semana": 40,
+    "horas_al_corte": -8,
+    "centros_esperados": 4,
+    "recibidos": 2,
+    "porcentaje": 50.0,
+    "faltantes": [
+     "CAP EVAL SIGMA",
+     "CAP EVAL TAU"
+    ],
+    "acciones_previas": [],
+    "memoria": [
+     {
+      "nota": "Personal de estadística de vacaciones hasta el miércoles; la red enviará apenas regrese.",
+      "desde": "2026-10-12",
+      "fuente": "humano"
+     }
+    ],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": false,
+    "historial_semanas_previas": [
+     {
+      "semana": 38,
+      "porcentaje": 100
+     },
+     {
+      "semana": 39,
+      "porcentaje": 100
+     }
+    ]
+   },
+   "espera": {
+    "alguno_de": [
+     "RECORDATORIO_RED"
+    ],
+    "ninguno_de": [
+     "ESCALAR"
+    ]
+   }
+  },
+  {
+   "id": "S09",
+   "titulo": "La red suele atrasarse y faltan 2 días",
+   "por_que": "El valor de los patrones: avisar ANTES del corte a quien suele atrasarse.",
+   "expediente": {
+    "tipo_caso": "red",
+    "anio": 2026,
+    "semana": 40,
+    "acciones_previas": [],
+    "memoria": [],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": false,
+    "caso_id": "red:RED EVAL OESTE",
+    "red": "RED EVAL OESTE",
+    "horas_al_corte": 50,
+    "centros_esperados": 3,
+    "recibidos": 3,
+    "porcentaje": 100.0,
+    "faltantes": [],
+    "pendientes_por_tipo": [
+     {
+      "centro": "HOSPITAL EVAL OMEGA",
+      "recibidos": [
+       "Consulta Externa",
+       "Hospitalización"
+      ],
+      "faltan": [
+       "Emergencia"
+      ],
+      "sin_ningun_envio": false,
+      "tipos_aprendidos": true
+     }
+    ],
+    "perfil_red": {
+     "semanas_analizadas": 8,
+     "hay_datos_suficientes": true,
+     "semanas_con_problema": 6,
+     "suele_atrasarse": true,
+     "tipo_que_suele_faltar": {
+      "tipo": "Emergencia",
+      "semanas": 6,
+      "de": 8
+     },
+     "tendencia": "estable",
+     "suele_esperar_recordatorio": true,
+     "texto": "Envío tarde o incompleto en 6 de las últimas 8 semanas; lo que más falta o llega tarde es Emergencia (6 de 8)."
+    },
+    "contexto_interno_no_va_en_el_correo": {
+     "redes_total": 8,
+     "redes_completas": 5,
+     "redes_con_pendientes": 3,
+     "es_la_unica_red_con_pendientes": false
+    },
+    "historial_semanas_previas": []
+   },
+   "espera": {
+    "alguno_de": [
+     "RECORDATORIO_RED"
+    ],
+    "ninguno_de": [
+     "ESCALAR"
+    ],
+    "sin_comparar": true
+   }
+  },
+  {
+   "id": "S10",
+   "titulo": "Red que siempre cumple y faltan 2 días",
+   "por_que": "Sin patrón no se molesta a la red: aún tiene tiempo.",
+   "expediente": {
+    "tipo_caso": "red",
+    "anio": 2026,
+    "semana": 40,
+    "acciones_previas": [],
+    "memoria": [],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": false,
+    "caso_id": "red:RED EVAL ESTE",
+    "red": "RED EVAL ESTE",
+    "horas_al_corte": 50,
+    "centros_esperados": 4,
+    "recibidos": 2,
+    "porcentaje": 50.0,
+    "faltantes": [
+     "CAP EVAL SIGMA",
+     "CAP EVAL TAU"
+    ],
+    "pendientes_por_tipo": [
+     {
+      "centro": "CAP EVAL SIGMA",
+      "recibidos": [],
+      "faltan": [
+       "Consulta Externa"
+      ],
+      "sin_ningun_envio": true,
+      "tipos_aprendidos": true
+     },
+     {
+      "centro": "CAP EVAL TAU",
+      "recibidos": [],
+      "faltan": [
+       "Consulta Externa"
+      ],
+      "sin_ningun_envio": true,
+      "tipos_aprendidos": true
+     }
+    ],
+    "perfil_red": {
+     "semanas_analizadas": 8,
+     "hay_datos_suficientes": true,
+     "semanas_con_problema": 0,
+     "suele_atrasarse": false,
+     "tipo_que_suele_faltar": null,
+     "tendencia": "estable",
+     "suele_esperar_recordatorio": false,
+     "texto": "A tiempo en las últimas 8 semanas."
+    },
+    "contexto_interno_no_va_en_el_correo": {
+     "redes_total": 8,
+     "redes_completas": 5,
+     "redes_con_pendientes": 3,
+     "es_la_unica_red_con_pendientes": false
+    },
+    "historial_semanas_previas": []
+   },
+   "espera": {
+    "alguno_de": [
+     "SIN_ACCION"
+    ],
+    "ninguno_de": [
+     "RECORDATORIO_RED",
+     "ESCALAR"
+    ]
+   }
+  },
+  {
+   "id": "S11",
+   "titulo": "Solo falta la Emergencia de un hospital y el corte es hoy",
+   "por_que": "Un pendiente parcial (por tipo) también se recuerda, con el detalle exacto.",
+   "expediente": {
+    "tipo_caso": "red",
+    "anio": 2026,
+    "semana": 40,
+    "acciones_previas": [],
+    "memoria": [],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": false,
+    "caso_id": "red:RED EVAL LITORAL",
+    "red": "RED EVAL LITORAL",
+    "horas_al_corte": 9,
+    "centros_esperados": 5,
+    "recibidos": 5,
+    "porcentaje": 100.0,
+    "faltantes": [],
+    "pendientes_por_tipo": [
+     {
+      "centro": "HOSPITAL EVAL RHO",
+      "recibidos": [
+       "Consulta Externa",
+       "Hospitalización"
+      ],
+      "faltan": [
+       "Emergencia"
+      ],
+      "sin_ningun_envio": false,
+      "tipos_aprendidos": true
+     }
+    ],
+    "perfil_red": {
+     "semanas_analizadas": 8,
+     "hay_datos_suficientes": true,
+     "semanas_con_problema": 0,
+     "suele_atrasarse": false,
+     "tipo_que_suele_faltar": null,
+     "tendencia": "estable",
+     "suele_esperar_recordatorio": false,
+     "texto": "A tiempo en las últimas 8 semanas."
+    },
+    "contexto_interno_no_va_en_el_correo": {
+     "redes_total": 8,
+     "redes_completas": 5,
+     "redes_con_pendientes": 3,
+     "es_la_unica_red_con_pendientes": false
+    },
+    "historial_semanas_previas": []
+   },
+   "espera": {
+    "alguno_de": [
+     "RECORDATORIO_RED"
+    ],
+    "ninguno_de": [
+     "ESCALAR"
+    ],
+    "sin_comparar": true
+   }
+  },
+  {
+   "id": "S12",
+   "titulo": "Es la única red que falta y el corte ya venció",
+   "por_que": "Saber que es la única ayuda a priorizar, pero NUNCA se le dice a la red.",
+   "expediente": {
+    "tipo_caso": "red",
+    "anio": 2026,
+    "semana": 40,
+    "acciones_previas": [],
+    "memoria": [],
+    "observaciones_pendientes": 0,
+    "solicitud_password_abierta": false,
+    "caso_id": "red:RED EVAL SELVA",
+    "red": "RED EVAL SELVA",
+    "horas_al_corte": -3,
+    "centros_esperados": 3,
+    "recibidos": 1,
+    "porcentaje": 33.3,
+    "faltantes": [
+     "CAP EVAL PHI",
+     "CAP EVAL CHI"
+    ],
+    "pendientes_por_tipo": [
+     {
+      "centro": "CAP EVAL PHI",
+      "recibidos": [],
+      "faltan": [
+       "Consulta Externa"
+      ],
+      "sin_ningun_envio": true,
+      "tipos_aprendidos": true
+     },
+     {
+      "centro": "CAP EVAL CHI",
+      "recibidos": [],
+      "faltan": [
+       "Consulta Externa",
+       "Emergencia"
+      ],
+      "sin_ningun_envio": true,
+      "tipos_aprendidos": true
+     }
+    ],
+    "perfil_red": {
+     "semanas_analizadas": 8,
+     "hay_datos_suficientes": true,
+     "semanas_con_problema": 6,
+     "suele_atrasarse": true,
+     "tipo_que_suele_faltar": {
+      "tipo": "Emergencia",
+      "semanas": 6,
+      "de": 8
+     },
+     "tendencia": "estable",
+     "suele_esperar_recordatorio": true,
+     "texto": "Envío tarde o incompleto en 6 de las últimas 8 semanas; lo que más falta o llega tarde es Emergencia (6 de 8)."
+    },
+    "contexto_interno_no_va_en_el_correo": {
+     "redes_total": 8,
+     "redes_completas": 7,
+     "redes_con_pendientes": 1,
+     "es_la_unica_red_con_pendientes": true
+    },
+    "historial_semanas_previas": []
+   },
+   "espera": {
+    "alguno_de": [
+     "RECORDATORIO_RED"
+    ],
+    "ninguno_de": [
+     "ESCALAR"
+    ],
+    "sin_comparar": true
+   }
+  }
+ ]
+}

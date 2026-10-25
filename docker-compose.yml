@@ -1,0 +1,72 @@
+# SIREA: web + proceso programado.
+#   docker compose up -d --build
+# Los secretos NO van en la imagen: el .env y credentials/ se montan desde el servidor.
+services:
+  app:
+    build: .
+    image: sirea:latest
+    container_name: sirea-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: America/Lima
+    ports:
+      # APP_BIND=0.0.0.0 (por defecto): la app se abre directo en http://<equipo>:8501.
+      # APP_BIND=127.0.0.1: solo el propio equipo; entonces se entra por HTTPS con el perfil "https" (ver abajo).
+      - "${APP_BIND:-0.0.0.0}:8501:8501"
+    volumes:
+      - ./credentials:/app/credentials:ro
+      - ./storage:/app/storage
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  programador:
+    build: .
+    image: sirea:latest
+    container_name: sirea-programador
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: America/Lima
+    command: ["python", "-m", "src.programador"]
+    volumes:
+      - ./credentials:/app/credentials:ro
+      - ./storage:/app/storage
+    healthcheck:
+      # El proceso anota un latido cada minuto; si tiene más de 3 minutos, el contenedor se marca como no saludable.
+      test: ["CMD", "python", "-c", "import time,sys; sys.exit(0 if time.time()-int(open('/app/storage/logs/programador.latido').read())<180 else 1)"]
+      interval: 60s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+
+  # HTTPS (opcional pero recomendado en el piloto): Caddy cifra la conexión y la pasa a la app.
+  #   1) En .env:  APP_BIND=127.0.0.1   PROXY_CONFIABLE=true   SIRE_HOST=<nombre o IP del equipo>
+  #   2) docker compose --profile https up -d --build
+  #   3) Abrir https://<SIRE_HOST>  (puertos 80 y 443; permitirlos en el Firewall de Windows)
+  # Certificado: por defecto Caddy crea uno interno (los navegadores avisan hasta instalar su certificado
+  # raíz, ver GUIA_DESPLIEGUE_WINDOWS.md). Con un certificado institucional, ver Caddyfile.
+  proxy:
+    image: caddy:2
+    container_name: sirea-https
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      SIRE_HOST: ${SIRE_HOST:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

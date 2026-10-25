@@ -1,0 +1,61 @@
+# Credenciales (NUNCA subir a GitHub)
+credentials/
+*.json
+# Casos de evaluación del Agente Operativo (ficticios, sin secretos): SÍ van al repositorio
+!src/agentes/casos_eval/*.json
+.env
+.env.*
+!.env.example
+*.respaldo
+*.bak
+*.pem
+*.key
+
+# Base de datos
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos temporales
+storage/temp/
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+certs/*
+!certs/.gitkeep
+
+# Copias/respaldos del .env y archivos de apoyo (tienen secretos): nunca al repositorio
+*.old
+caddy-root.crt
+
+# Envios reales y logs (datos de las redes): no van al repositorio
+storage/envios/*
+!storage/envios/.gitkeep
+storage/logs/*
+!storage/logs/.gitkeep
+storage/backups/
+
+# Secretos de Streamlit (se cargan en el panel de Streamlit Cloud, no en el repositorio)
+.streamlit/secrets.toml
+# Salida de scripts/env_a_secrets.py (contiene claves)
+secretos_para_streamlit*.txt
+
+# Entornos virtuales y paquetes
+venv/
+.venv/
+*.zip
+*.whl
+.pytest_cache/
+
+# Datos locales que no deben publicarse
+data/REDES2.txt

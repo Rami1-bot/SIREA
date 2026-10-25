@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Usuarios frecuentes</title></head>
+<body style="margin:0">
+<script>
+/*
+ * Almacén de «usuarios frecuentes» en el navegador de la persona (localStorage).
+ * No se envía a ningún servidor propio: solo se guarda en este equipo.
+ *
+ * Protocolo con Streamlit (componente bidireccional sin librerías):
+ *   - al iniciar:  streamlit:componentReady
+ *   - Streamlit envía streamlit:render con args { accion: {tipo, datos, correo, nonce} }
+ *   - se responde con streamlit:setComponentValue = lista actual de usuarios
+ */
+(function () {
+  var CLAVE = "sire_frecuentes_v1";
+  var MAX = 6;
+  var ultimoEnviado = null;
+
+  function enviar(tipo, datos) {
+    var msg = { isStreamlitMessage: true, type: tipo };
+    for (var k in datos) msg[k] = datos[k];
+    window.parent.postMessage(msg, "*");
+  }
+
+  function leer() {
+    try {
+      var v = JSON.parse(localStorage.getItem(CLAVE) || "[]");
+      return Array.isArray(v) ? v : [];
+    } catch (e) { return []; }
+  }
+
+  function escribir(lista) {
+    try { localStorage.setItem(CLAVE, JSON.stringify(lista)); } catch (e) {}
+  }
+
+  function texto(v, max) { return String(v == null ? "" : v).trim().slice(0, max); }
+
+  function correoNorm(c) { return texto(c, 254).toLowerCase(); }
+
+  function aplicar(accion, lista) {
+    if (!accion || !accion.tipo) return lista;
+    var nonce = texto(accion.nonce, 80);
+    var visto = "";
+    try { visto = localStorage.getItem(CLAVE + "_nonce") || ""; } catch (e) {}
+    if (!nonce || nonce === visto) return lista;       // ya aplicada
+    try { localStorage.setItem(CLAVE + "_nonce", nonce); } catch (e) {}
+
+    if (accion.tipo === "guardar" && accion.datos) {
+      var d = accion.datos;
+      var correo = correoNorm(d.correo);
+      if (!correo) return lista;
+      lista = lista.filter(function (u) { return correoNorm(u.correo) !== correo; });
+      lista.unshift({
+        nombres: texto(d.nombres, 80),
+        apellidos: texto(d.apellidos, 80),
+        correo: correo
+      });
+      lista = lista.slice(0, MAX);
+    } else if (accion.tipo === "quitar") {
+      var c = correoNorm(accion.correo);
+      lista = lista.filter(function (u) { return correoNorm(u.correo) !== c; });
+    } else if (accion.tipo === "olvidar") {
+      lista = [];
+    }
+    escribir(lista);
+    return lista;
+  }
+
+  function alRenderizar(ev) {
+    if (!ev.data || ev.data.type !== "streamlit:render") return;
+    var args = ev.data.args || {};
+    var lista = aplicar(args.accion, leer());
+    var firma = JSON.stringify(lista);
+    if (firma !== ultimoEnviado) {
+      ultimoEnviado = firma;
+      enviar("streamlit:setComponentValue", { value: lista, dataType: "json" });
+    }
+    enviar("streamlit:setFrameHeight", { height: 0 });
+  }
+
+  window.addEventListener("message", alRenderizar);
+  enviar("streamlit:componentReady", { apiVersion: 1 });
+  enviar("streamlit:setFrameHeight", { height: 0 });
+})();
+</script>
+</body>
+</html>

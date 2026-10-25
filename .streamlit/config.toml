@@ -1,0 +1,59 @@
+# Configuración de Streamlit para despliegue en producción/piloto.
+#
+# Por qué existe este archivo: sin él, Streamlit usa valores por
+# defecto pensados para desarrollo local, en particular
+# client.showErrorDetails=true, que muestra el traceback completo de
+# CUALQUIER excepción no capturada (rutas del servidor, nombres de
+# variables, y potencialmente fragmentos de datos) a cualquier
+# visitante del sitio. Este archivo lo desactiva a nivel de framework,
+# como defensa adicional a los try/except que ya se agregaron en el
+# código (ver app.py y app_pages/usuario_logica.py).
+
+[client]
+# No mostrar tracebacks de Python al usuario ante un error no
+# capturado. El detalle completo queda solo en el log del servidor
+# (ver src/logging_config.py).
+showErrorDetails = false
+
+[server]
+# Protección CSRF de Streamlit (token de cliente) -- explícito en vez
+# de confiar en el valor por defecto, que puede cambiar entre
+# versiones.
+enableXsrfProtection = true
+
+# Streamlit no debe intentar abrir un navegador ni asumir una sesión
+# de escritorio en el servidor donde corre el piloto.
+headless = true
+
+# Límite del propio Streamlit para cualquier archivo subido (en MB),
+# como primera barrera ANTES de que el código de la app procese nada.
+# Se deja con margen por encima del tamaño máximo de ZIP configurable
+# desde el panel de administrador (por defecto 80 MB, configurable
+# hasta 200 MB) -- si se sube ese límite más allá de 250 MB, hay que
+# subir también este valor.
+maxUploadSize = 250
+
+# CORS: no se sirve como API para ser consumida desde otros orígenes,
+# así que se deja en su valor seguro por defecto (protegido cuando
+# enableXsrfProtection está activo). No se fuerza a false aquí para no
+# romper el proxy/balanceador que use quien despliegue el piloto -- si
+# la app queda detrás de un dominio propio, se recomienda revisar este
+# valor junto con la configuración de ese proxy.
+
+[browser]
+# No enviar estadísticas de uso a Streamlit/Snowflake. Este sistema
+# maneja datos de una entidad de salud pública; no hay razón para que
+# telemetría de uso salga del entorno del piloto.
+gatherUsageStats = false
+
+[theme]
+# Tema corporativo de SIREA (azul EsSalud). Define los colores base de los
+# componentes nativos de Streamlit (selectores, casillas, tablas); el
+# resto del aspecto lo aporta utils/tema.py.
+base = "light"
+primaryColor = "#0077C8"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6F8"
+textColor = "#14202B"
+font = "sans serif"
+baseRadius = "6px"

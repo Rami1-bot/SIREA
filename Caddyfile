@@ -1,0 +1,30 @@
+# Proxy HTTPS de SIREA (Caddy). Se activa con:  docker compose --profile https up -d
+#
+# Opciones globales. Los navegadores NO envían el nombre del servidor (SNI) cuando se entra por una IP
+# (https://10.0.83.50); sin esto Caddy no sabe qué certificado entregar y el navegador muestra
+# ERR_SSL_PROTOCOL_ERROR. default_sni le indica el certificado a usar en ese caso.
+{
+	default_sni {$SIRE_HOST:localhost}
+}
+
+# SIRE_HOST viene del .env (nombre del equipo o IP por la que entrará el personal, p. ej. sire-oiis o 10.20.30.40).
+{$SIRE_HOST:localhost} {
+	# Opción A (por defecto): certificado interno que crea Caddy.
+	tls internal
+
+	# Opción B: certificado institucional entregado por TI. Copie los dos archivos a la carpeta ./certs
+	# y cambie la línea anterior por:
+	#   tls /certs/sire.crt /certs/sire.key
+
+	encode gzip
+
+	# Streamlit usa WebSocket; Caddy lo deja pasar solo. Caddy escribe X-Forwarded-For con la IP real
+	# del visitante (descarta el que el visitante intente enviar), por eso el .env lleva PROXY_CONFIABLE=true.
+	reverse_proxy app:8501
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+	}
+}

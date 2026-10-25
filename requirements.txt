@@ -1,0 +1,77 @@
+# ============================================================
+# Dependencias directas, ancladas a una versión exacta probada.
+#
+# Antes todas usaban ">=" sin techo, lo que significa que dos
+# instalaciones hechas en fechas distintas (tu máquina, el servidor del
+# piloto, CI) podían terminar con paquetes diferentes sin que nadie lo
+# pidiera -- incluyendo saltos de versión mayor con cambios que rompen
+# compatibilidad (p. ej. pandas 3.x, publicado después de que se
+# escribiera este proyecto). Un despliegue reproducible necesita que
+# "pip install" instale siempre lo mismo.
+#
+# Para reproducibilidad COMPLETA (incluyendo las dependencias
+# indirectas: lo que cada uno de estos paquetes instala a su vez), usar
+# requirements-lock.txt en vez de este archivo.
+#
+# Para actualizar una versión de forma deliberada: cambiar el número
+# aquí, instalar en un entorno de prueba, y si todo sigue funcionando,
+# regenerar requirements-lock.txt con:
+#   pip install -r requirements.txt && pip freeze > requirements-lock.txt
+# ============================================================
+
+# ============================================================
+# CORE - Framework y utilidades principales
+# ============================================================
+streamlit==1.64.0
+pandas==2.3.3
+numpy==2.4.6
+
+# ============================================================
+# SUPABASE - Base de datos en la nube
+# ============================================================
+supabase==2.31.0
+python-dotenv==1.2.3
+bcrypt==5.0.0
+
+# ============================================================
+# GOOGLE DRIVE API - Para almacenamiento en la nube
+# ============================================================
+google-api-python-client==2.200.0
+google-auth-httplib2==0.4.2
+google-auth-oauthlib==1.4.1
+
+# ============================================================
+# VISUALIZACIÓN - Gráficas interactivas
+#
+# (matplotlib no está en esta lista: se revisó el código completo y no
+# se usa en ningún archivo -- solo plotly se importa para gráficas.
+# Incluir una dependencia sin usar aumenta la superficie de ataque y el
+# tiempo de instalación sin ningún beneficio.)
+# ============================================================
+plotly==7.1.0
+
+# ============================================================
+# PROCESAMIENTO DE ARCHIVOS - Excel y datos
+# ============================================================
+openpyxl==3.1.5
+python-docx==1.2.0
+# SIREA 3.3: informe semanal en PDF (usa pillow para la marca de agua)
+reportlab==5.0.1
+pillow==12.3.0
+pyarrow==25.0.1
+
+# ============================================================
+# UTILIDADES - Fechas y helpers
+# ============================================================
+pytz==2026.4
+
+# ------------------------------------------------------------
+# SIREA: asistentes de IA
+# ------------------------------------------------------------
+# Gemini (Google AI Studio), proveedor principal.
+google-genai>=1.20.0
+# Groq se consume por su API compatible con OpenAI usando httpx (ya es
+# dependencia de supabase); no hace falta otro SDK.
+httpx>=0.27.0
+# Pruebas (python -m pytest tests/ -q)
+pytest>=8.0.0
