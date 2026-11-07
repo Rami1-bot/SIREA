@@ -67,3 +67,88 @@ def crear_cliente_supabase(url: str, key: str):
     except Exception as e:                                # versión sin soporte: se conserva el comportamiento anterior
         print(f"⚠️ No se pudo usar la conexión robusta a Supabase ({e}); se usa la estándar.")
         return create_client(url, key)
+
+
+# ============================================================
+# DIAGNÓSTICO DE CONEXIÓN (SIREA 3.5)
+# ============================================================
+# Si el servidor de Supabase no se puede ubicar (DNS, sin internet, proxy o una URL mal escrita),
+# cada consulta falla con «getaddrinfo failed» y la app muestra datos vacíos que parecen otro error
+# (por ejemplo «AÑO NO PERMITIDO»). Esto lo detecta una vez y lo explica en pantalla.
+
+_CACHE_DIAG: dict = {}
+_ULTIMO_LOG: dict = {}
+_MARCAS_SIN_RED = ("getaddrinfo", "11001", "11004", "name or service not known", "nodename nor servname",
+                   "temporary failure in name resolution", "connecterror", "connection refused", "10061")
+
+
+def es_error_de_conexion(error) -> bool:
+    """True si el error es de red (no se ubica o no responde el servidor), no de datos."""
+    texto = f"{type(error).__name__}: {error}".lower()
+    return any(m in texto for m in _MARCAS_SIN_RED)
+
+
+def registrar_error(mensaje: str, error=None, cada_segundos: int = 60) -> None:
+    """print() del error; los de conexión se resumen en una línea por minuto (evita cientos de líneas)."""
+    if error is not None and es_error_de_conexion(error):
+        ahora = time.time()
+        _ULTIMO_LOG["fallo"] = (ahora, str(error))     # lo usa diagnostico_conexion() aunque haya proxy
+        if ahora - _ULTIMO_LOG.get("red", 0) < cada_segundos:
+            return
+        _ULTIMO_LOG["red"] = ahora
+        print(f"⚠️ Sin conexión con la base de datos ({error}). {diagnostico_conexion() or ''} "
+              f"Se omiten los avisos repetidos durante {cada_segundos} s.")
+        return
+    print(mensaje)
+
+
+def host_supabase(url: Optional[str] = None) -> str:
+    from urllib.parse import urlparse
+    url = (url if url is not None else os.getenv("SUPABASE_URL", "")).strip().strip('"').strip("'")
+    try:
+        return (urlparse(url).hostname or "").strip()
+    except Exception:
+        return ""
+
+
+def diagnostico_conexion(url: Optional[str] = None, cada_segundos: int = 60) -> Optional[str]:
+    """
+    None si el servidor de SUPABASE_URL se puede ubicar; si no, un texto que explica qué revisar.
+    Solo resuelve el nombre (no envía datos ni la clave) y guarda el resultado 60 s.
+    """
+    import socket
+    url = url if url is not None else os.getenv("SUPABASE_URL", "")
+    host = host_supabase(url)
+    if not (url or "").strip():
+        return "SUPABASE_URL está vacío: complételo en .streamlit/secrets.toml."
+    if not host:
+        return f"SUPABASE_URL no es una dirección válida («{url.strip()[:60]}»). Debe ser como https://xxxx.supabase.co"
+    if host in ("localhost", "127.0.0.1") or host.endswith(".local"):
+        return None
+    if host.lower().startswith("xxxx") or "tu-proyecto" in host.lower():
+        return f"SUPABASE_URL todavía tiene el valor de ejemplo («{host}»): ponga la dirección de su proyecto."
+    ahora = time.time()
+    hit = _CACHE_DIAG.get(host)
+    if hit and ahora - hit[0] < cada_segundos:
+        return hit[1]
+    # Con proxy corporativo el nombre lo resuelve el proxy: no se puede comprobar por DNS.
+    # Entonces se usa lo que pasó de verdad: si una consulta falló por conexión hace poco, hay aviso.
+    if any(os.getenv(v) for v in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy")):
+        fallo = _ULTIMO_LOG.get("fallo")
+        if fallo and ahora - fallo[0] < 120:
+            return (f"No se pudo conectar con «{host}» a través del proxy ({fallo[1][:120]}). Revise que el "
+                    "proyecto de Supabase no esté pausado, la VPN o el proxy (variable HTTPS_PROXY).")
+        return None
+    anterior = socket.getdefaulttimeout()
+    try:
+        socket.setdefaulttimeout(4)
+        socket.getaddrinfo(host, 443)
+        resultado = None
+    except OSError as e:
+        resultado = (f"No se encuentra el servidor «{host}» ({e}). Revise que la PC tenga internet, que "
+                     "SUPABASE_URL en .streamlit/secrets.toml esté bien escrito y, en la red de EsSalud, "
+                     "la VPN o el proxy (variable HTTPS_PROXY).")
+    finally:
+        socket.setdefaulttimeout(anterior)
+    _CACHE_DIAG[host] = (ahora, resultado)
+    return resultado

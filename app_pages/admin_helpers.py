@@ -133,7 +133,7 @@ def estilo_estado(val):
     if val_str == 'APROBADO':
         return 'background-color: #D4EDDA; color: #155724; font-weight: 700; border-radius: 20px; padding: 4px 12px;'
     elif val_str == 'OBSERVADO':
-        return 'background-color: #FFF3CD; color: #856404; font-weight: 700; border-radius: 20px; padding: 4px 12px;'
+        return 'background-color: #FFF3E3; color: #96500A; font-weight: 700; border-radius: 20px; padding: 4px 12px;'
     elif val_str == 'ATRASADO':
         return 'background-color: #F8D7DA; color: #721C24; font-weight: 700; border-radius: 20px; padding: 4px 12px;'
     else:
@@ -147,7 +147,7 @@ def estilo_porcentaje(val):
         if valor >= 80:
             return 'background-color: #D4EDDA; color: #155724; font-weight: 700; border-radius: 20px; padding: 4px 12px;'
         elif valor >= 50:
-            return 'background-color: #FFF3CD; color: #856404; font-weight: 700; border-radius: 20px; padding: 4px 12px;'
+            return 'background-color: #FFF3E3; color: #96500A; font-weight: 700; border-radius: 20px; padding: 4px 12px;'
         else:
             return 'background-color: #F8D7DA; color: #721C24; font-weight: 700; border-radius: 20px; padding: 4px 12px;'
     except:
@@ -172,3 +172,63 @@ def obtener_centros_excluidos():
     """
     db_manager = get_db_manager()
     return db_manager.obtener_todas_las_exclusiones_agrupadas()
+
+
+# ============================================================
+# CAMBIOS DE CONFIGURACIÓN (v7.5): permiso + motivo obligatorio
+# ============================================================
+
+def estado_configuracion():
+    """
+    (actor, puede) para las pantallas que cambian la configuración. `puede` es True solo para el
+    SUPER_ADMIN principal o quien tenga el permiso «Cambiar la configuración» (se consulta al servidor).
+    """
+    from src.cambios_configuracion import get_cambios_configuracion
+    actor = actor_actual()
+    return actor, get_cambios_configuracion().puede(actor)
+
+
+def campo_motivo(clave: str, puede: bool = True, etiqueta: str = "Motivo del cambio (obligatorio)") -> str:
+    """Campo de texto del motivo. Se limpia tras un cambio exitoso con limpiar_motivo(clave)."""
+    ver = st.session_state.get(f"{clave}_ver", 0)
+    if not puede:
+        return st.text_input(
+            "Motivo del cambio (bloqueado: falta el permiso)", key=f"{clave}_{ver}", max_chars=300, disabled=True,
+            placeholder="Bloqueado: su cuenta no tiene el permiso. Pídalo en el cuadro «Solicitar acceso».",
+            help="Con el permiso «Cambiar la configuración» este campo se habilita.")
+    return st.text_input(
+        etiqueta, key=f"{clave}_{ver}", max_chars=300,
+        placeholder="Ej.: Se amplía el plazo por falla de conectividad en la red",
+        help="Mínimo 8 caracteres. Queda en el «Control de actividad» junto con el valor anterior y el nuevo.")
+
+
+def boton_protegido(puede: bool, etiqueta: str, *args, ayuda_bloqueo: str = "", **kw):
+    """
+    Botón que, sin permiso, sale bloqueado, en ámbar, con candado y la leyenda «requiere permiso».
+    Con permiso es un st.button normal (acepta `disabled` para otras condiciones). Devuelve True si se pulsó.
+    """
+    if puede:
+        return st.button(etiqueta, *args, **kw)
+    kw = {k: v for k, v in kw.items() if k not in ("type", "icon", "disabled", "help")}
+    clave = kw.get("key") or etiqueta
+    with st.container(key=f"bloq_{clave}"):
+        st.button(f"{etiqueta} (requiere permiso)", *args, icon=":material/lock:", disabled=True,
+                  help=ayuda_bloqueo or "Su cuenta no tiene el permiso necesario. Pídalo en «Solicitar acceso».", **kw)
+    return False
+
+
+def boton_cfg(puede: bool):
+    """Atajo: `boton = boton_cfg(puede)` y luego `boton("Guardar", key=..., type="primary")`."""
+    def _b(etiqueta, *args, **kw):
+        return boton_protegido(puede, etiqueta, *args,
+                               ayuda_bloqueo="Requiere el permiso «Cambiar la configuración». Pídalo en «Solicitar acceso».", **kw)
+    return _b
+
+
+def limpiar_motivo(clave: str) -> None:
+    st.session_state[f"{clave}_ver"] = st.session_state.get(f"{clave}_ver", 0) + 1
+
+
+def aviso_solo_consulta(que_no_puede: str = "Solo consulta: no puede cambiar la configuración"):
+    from app_pages.solicitar_permiso import aviso_sin_permiso
+    aviso_sin_permiso("CONFIGURACION", que_no_puede)

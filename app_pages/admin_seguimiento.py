@@ -12,10 +12,12 @@ from typing import Optional, List
 from src.db_manager import get_db_manager
 from src.data_loader import get_data_loader
 from src.config import Config
-from app_pages.admin_helpers import requerir_admin
+from app_pages.admin_helpers import requerir_admin, formatear_fecha_columna
+from utils.tabla_navegable import tabla_navegable_df
 from utils.helpers import sanitizar_html
-from utils.tema import kpi, mostrar, aviso, lista_estado
-from utils.tema_admin import esc, tabla_df, chip_porcentaje, chip_nivel, panel_cab, descargas
+from utils.tema import kpi, mostrar, aviso, lista_estado, chip
+from utils.tema_admin import (esc, tabla_df, chip_porcentaje, chip_nivel, panel_cab, descargas, chip_estado, etiqueta_estado,
+                              nivel_de, chip_nivel_texto, lista_cumplimiento)
 
 # NOTA: la semana y el año activos se obtienen de Config.get_semana_actual()
 # y Config.get_anio_actual() (antes había una copia local aquí que devolvía
@@ -55,6 +57,11 @@ def obtener_nombre_centro(centro):
     if isinstance(centro, dict):
         return centro.get('nombre', str(centro))
     return str(centro)
+
+
+def _chip_centro(estado) -> str:
+    return {"Enviado": chip("Enviado", "ok", "check"), "Pendiente": chip("Pendiente", "warn", "reloj"),
+            "Excluido": chip("Excluido", "mute")}.get(str(estado), chip(esc(estado), "mute"))
 
 
 def mostrar_seguimiento_semana_activa():
@@ -154,6 +161,7 @@ def mostrar_seguimiento_semana_activa():
         # y por eso "Pendientes" mostraba TODOS los centros de la red
         # en vez de solo los que faltan.
         nombres_enviados = set()
+        info_envio = {}      # nombre (minúsculas) -> datos del último envío que lo incluyó
         for envio in envios:
             centros_envio = envio.get('centros', [])
             if isinstance(centros_envio, list):
@@ -174,20 +182,38 @@ def mostrar_seguimiento_semana_activa():
                             nombre = centro_str
                     
                     if nombre not in centros_excluidos_red and centro_str not in centros_excluidos_red:
-                        nombres_enviados.add(nombre.lower())
+                        clave_c = nombre.lower()
+                        nombres_enviados.add(clave_c)
+                        previo = info_envio.get(clave_c)
+                        if previo is None or str(envio.get('fecha_envio') or '') > previo['crudo']:
+                            tipo = envio.get('tipo_reporte') or []
+                            info_envio[clave_c] = {
+                                'crudo': str(envio.get('fecha_envio') or ''),
+                                'responsable': f"{envio.get('nombre_usuario') or ''} {envio.get('apellido_usuario') or ''}".strip() or "—",
+                                'fecha': formatear_fecha_columna(envio.get('fecha_envio')),
+                                'tipo': (', '.join(tipo) if isinstance(tipo, list) else str(tipo or '')).replace('Hospitalizacion', 'Hospitalización') or "—",
+                                'estado': str(envio.get('estado') or ''),
+                            }
         
         # Separar los centros de la red (ya sin excluidos) en enviados
         # y pendientes, comparando por nombre normalizado -- así ambas
         # listas quedan con el mismo formato "código nombre" al mostrarlas.
         centros_enviados = []
         centros_pendientes = []
+        filas_centros = []
         for c in centros_filtrados:
             nombre = c.get('nombre', '') if isinstance(c, dict) else str(c)
             etiqueta = formatear_centro(c)
             if nombre and nombre.lower() in nombres_enviados:
                 centros_enviados.append(etiqueta)
+                i = info_envio.get(nombre.lower(), {})
+                filas_centros.append([red, etiqueta, 'Enviado', i.get('responsable', '—'), i.get('tipo', '—'),
+                                      i.get('fecha', '—'), i.get('estado') or '—'])
             else:
                 centros_pendientes.append(etiqueta)
+                filas_centros.append([red, etiqueta, 'Pendiente', '—', '—', '—', '—'])
+        for ex in centros_excluidos_red:
+            filas_centros.append([red, str(ex), 'Excluido', '—', '—', '—', '—'])
         
         recibidos = len(centros_enviados)
         porcentaje = round((recibidos / total_centros) * 100, 1) if total_centros > 0 else 0
@@ -201,7 +227,8 @@ def mostrar_seguimiento_semana_activa():
             'Centros Enviados': centros_enviados,
             'Centros Pendientes': centros_pendientes,
             'Excluidos': centros_excluidos_red,
-            'Cantidad Excluidos': len(centros_excluidos_red)
+            'Cantidad Excluidos': len(centros_excluidos_red),
+            'Filas': filas_centros,
         })
     
     if not datos_seguimiento:
@@ -239,17 +266,21 @@ def mostrar_seguimiento_semana_activa():
         'Pendientes': len(d['Centros Pendientes']),
         'Excluidos': d['Cantidad Excluidos'],
         '% recibido': d['Porcentaje'],
-        'Situación': d['Porcentaje'],
+        'Situación': nivel_de(d['Porcentaje']),
     } for d in datos_seguimiento])
 
     with st.container(key="panel_resumen_seguimiento"):
         panel_cab(f"Resumen · Semana {semana_seleccionada} de {anio_seleccionado}",
                   "Estado de cada red en la semana elegida")
-        mostrar(tabla_df(
-            df_resumen,
-            chips={'% recibido': chip_porcentaje, 'Situación': chip_nivel},
-            derecha=('Total de establecimientos', 'Recibidos', 'Pendientes', 'Excluidos'),
-        ))
+        tabla_navegable_df(
+            "seg_resumen", df_resumen,
+            chips={'% recibido': chip_porcentaje, 'Situación': chip_nivel_texto},
+            derecha=('Total de establecimientos', 'Recibidos', 'Pendientes', 'Excluidos', '% recibido'),
+            filtro={"columna": "Situación", "opciones": ["Completo", "Parcial", "Bajo"], "etiqueta": "Situación"},
+            filtros=[{"columna": "Red", "etiqueta": "Red"}],
+            placeholder="Nombre de la red", unidad="redes", por_pagina_inicial=25,
+            orden_inicial="% recibido: de menor a mayor",
+        )
         total_excluidos = sum(d['Cantidad Excluidos'] for d in datos_seguimiento)
         if total_excluidos > 0:
             st.caption(f"{total_excluidos} centros excluidos en total (no se consideran en los cálculos).")
@@ -258,33 +289,49 @@ def mostrar_seguimiento_semana_activa():
     # DETALLE POR RED - CENTROS ENVIADOS Y PENDIENTES
     # ============================================================
 
+    filas_detalle = [f for d in datos_seguimiento for f in d['Filas']]
+    n_env = sum(1 for f in filas_detalle if f[2] == 'Enviado')
+    n_pen = sum(1 for f in filas_detalle if f[2] == 'Pendiente')
+    n_exc = sum(1 for f in filas_detalle if f[2] == 'Excluido')
+
     with st.container(key="panel_detalle_seguimiento"):
-        panel_cab("Detalle por red", "Abra una red para ver qué centros enviaron y cuáles faltan")
-        for dato in datos_seguimiento:
-            enviados = dato['Centros Enviados']
-            pendientes = dato['Centros Pendientes']
-            excluidos = dato.get('Excluidos', [])
-            titulo = f"{dato['Red']} · {len(enviados)} enviados · {len(pendientes)} pendientes"
-            if excluidos:
-                titulo += f" · {len(excluidos)} excluidos"
-            with st.expander(titulo):
-                c1, c2, c3 = st.columns(3) if excluidos else (*st.columns(2), None)
-                with c1:
-                    st.markdown(f"**Enviaron ({len(enviados)})**")
-                    if enviados:
-                        mostrar(lista_estado([(esc(c), "ok", "Enviado") for c in sorted(enviados)]))
-                    else:
-                        st.caption("Ninguno")
-                with c2:
-                    st.markdown(f"**Pendientes ({len(pendientes)})**")
-                    if pendientes:
-                        mostrar(lista_estado([(esc(c), "warn", "Pendiente") for c in sorted(pendientes)]))
-                    else:
-                        st.caption("Todos enviaron")
-                if c3 is not None:
-                    with c3:
-                        st.markdown(f"**Excluidos ({len(excluidos)})**")
-                        mostrar(lista_estado([(esc(c), "mute", "Excluido") for c in sorted(excluidos)]))
+        panel_cab("Detalle por red", "Qué centro envió, quién lo envió y cuáles faltan; filtre por red, centro o estado")
+        d1, d2 = st.columns([1, 1.9], gap="large")
+        with d1:
+            st.markdown("**Redes más atrasadas**")
+            atrasadas = sorted(datos_seguimiento, key=lambda d: (d['Porcentaje'], -len(d['Centros Pendientes'])))[:8]
+            mostrar(lista_cumplimiento([(d['Red'], d['Recibidos'], d['Total Establecimientos']) for d in atrasadas]))
+            if len(datos_seguimiento) > 8:
+                st.caption(f"Se muestran las 8 con menor avance de {len(datos_seguimiento)} redes; el resto está en la tabla.")
+        with d2:
+            st.markdown("**Centros**")
+            k1, k2, k3 = st.columns(3)
+            with k1:
+                mostrar(kpi("Enviaron", n_env, "Centros con envío", "ok", "check"))
+            with k2:
+                mostrar(kpi("Pendientes", n_pen, "Faltan por enviar", "warn" if n_pen else "ok", "reloj"))
+            with k3:
+                mostrar(kpi("Excluidos", n_exc, "No se cuentan", None, "info"))
+
+        columnas_det = ['Red', 'Centro', 'Estado', 'Responsable', 'Tipo de reporte', 'Fecha de envío', 'Estado del envío']
+        df_det = pd.DataFrame(filas_detalle, columns=columnas_det)
+        orden_estado = {'Pendiente': 0, 'Enviado': 1, 'Excluido': 2}
+        tabla_navegable_df(
+            "seg_detalle", df_det,
+            chips={'Estado': _chip_centro, 'Estado del envío': lambda e: chip_estado(e) if e and e != '—' else '—'},
+            filtro={"columna": "Estado", "opciones": ['Pendiente', 'Enviado', 'Excluido'], "etiqueta": "Estado del centro"},
+            filtros=[{"columna": "Red", "etiqueta": "Red"},
+                     {"columna": "Centro", "etiqueta": "Centro", "depende_de": "Red"},
+                     {"columna": "Tipo de reporte", "etiqueta": "Tipo de reporte"}],
+            fechas={"columna": "Fecha de envío", "etiqueta": "Envío"},
+            columnas_elegibles=True, ocultas=('Estado del envío',),
+            orden_opciones=[("Pendientes primero", "Estado", False),
+                            ("Red: A → Z", "Red", False), ("Centro: A → Z", "Centro", False)],
+            claves_orden={'Estado': lambda f: orden_estado.get(str(f[2]), 9)},
+            orden_inicial="Pendientes primero",
+            placeholder="Centro, responsable o red", unidad="centros", por_pagina_inicial=25,
+            descarga=(f"seguimiento_centros_{semana_seleccionada}_{anio_seleccionado}", "Centros"),
+        )
 
     # ============================================================
     # DESCARGAS

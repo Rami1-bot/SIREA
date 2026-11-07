@@ -16,6 +16,7 @@ from datetime import datetime
 
 from src.config import Config
 from utils.helpers import sanitizar_nombre, tamaño_legible
+from src import zip_seguridad as seguridad
 
 
 # Tipo de reporte que lleva la SEGUNDA letra del nombre del archivo
@@ -58,6 +59,10 @@ class ZipProcessor:
         self.tamano_maximo_bytes = tamano_maximo_mb * 1024 * 1024
         self.max_archivos_permitidos = 100
         self.max_tamano_descomprimido_mb = 500
+        # Opcional (ZIP_BLOQUEAR_EXTENSIONES_NO_PERMITIDAS=true): un archivo con extensión
+        # inesperada (.txt, .png...) deja de ser «observación» y bloquea el envío.
+        self.bloquear_extensiones_no_permitidas = (
+            os.getenv("ZIP_BLOQUEAR_EXTENSIONES_NO_PERMITIDAS", "false").strip().lower() == "true")
 
     def _es_extension_permitida(self, ext: str, codigos_centros_validos: Optional[set] = None) -> bool:
         """
@@ -294,6 +299,7 @@ class ZipProcessor:
             "extensiones": [],
             "extensiones_invalidas": [],
             "archivos_invalidos": [],
+            "archivos_peligrosos": [],
             "centros_detectados": [],
             "codigos_fuera_de_red": [],
             "archivos_sin_centro_identificado": [],
@@ -338,6 +344,15 @@ class ZipProcessor:
         # Validación 4: Integridad del ZIP
         try:
             with zipfile.ZipFile(io.BytesIO(archivo_bytes)) as zf:
+                # Seguridad de la ESTRUCTURA (antes de leer nada): ZIP disfrazado, con
+                # contraseña, rutas inseguras, nombres repetidos, dobles extensiones,
+                # ZIP bomba. La cantidad de archivos y el tamaño total se validan más
+                # abajo con sus mensajes propios.
+                problemas = seguridad.revisar_estructura(
+                    archivo_bytes, zf, self.extensiones_bloqueadas, 10 ** 9, 10 ** 18)
+                if problemas:
+                    return self._rechazo_seguridad(resultado, problemas)
+
                 # Verificar si el ZIP es válido
                 archivo_corrupto = zf.testzip()
                 if archivo_corrupto is not None:
@@ -453,21 +468,35 @@ class ZipProcessor:
                 invalidos = set(archivos_invalidos)
                 detalle = []
                 sin_tipo = []
+                peligrosos = []
                 for archivo in archivos:
                     if archivo in invalidos:
+                        # Aunque la extensión no sea la esperada, se revisa igual el contenido:
+                        # un programa o un documento con macros no pasa con «observación».
+                        _h, _n, problema = seguridad.leer_y_revisar(zf, zf.getinfo(archivo))
+                        if problema:
+                            peligrosos.append({"archivo": archivo, "motivo": problema, "tipo": seguridad.MOTIVO_CONTENIDO})
                         continue
                     nom = self.analizar_nombre_reporte(archivo)
+                    # Lectura por partes: huella SHA-256 + revisión del CONTENIDO (firmas de
+                    # programas y scripts, macros, archivos comprimidos anidados, tamaño real).
+                    huella, n_bytes, problema = seguridad.leer_y_revisar(zf, zf.getinfo(archivo))
+                    if problema:
+                        peligrosos.append({"archivo": archivo, "motivo": problema, "tipo": seguridad.MOTIVO_CONTENIDO})
+                        continue
                     detalle.append({
                         "archivo": archivo,
                         "codigo": self._codigo_de_archivo(archivo, codigos_centros_validos),
                         "tipo": nom["tipo"],
                         "semana": nom["semana"],
                         "anio": nom["anio"],
-                        "sha256": hashlib.sha256(zf.read(archivo)).hexdigest(),
-                        "bytes": zf.getinfo(archivo).file_size,
+                        "sha256": huella,
+                        "bytes": n_bytes,
                     })
                     if nom["tipo"] is None:
                         sin_tipo.append(archivo)
+                if peligrosos:
+                    return self._rechazo_seguridad(resultado, peligrosos)
                 resultado["archivos_detalle"] = detalle
                 resultado["archivos_sin_tipo"] = sin_tipo
                 tipos = {d["tipo"] for d in detalle if d["tipo"]}
@@ -479,6 +508,14 @@ class ZipProcessor:
                     resultado["mensaje"] = (
                         f"El ZIP contiene archivos con extensiones bloqueadas: "
                         f"{', '.join(set(extensiones_bloqueadas))}"
+                    )
+                    resultado["valido"] = False
+                elif extensiones_invalidas and self.bloquear_extensiones_no_permitidas:
+                    resultado["estado"] = "corrupto"
+                    resultado["mensaje"] = (
+                        f"El ZIP contiene {len(archivos_invalidos)} archivo(s) con extensión no permitida "
+                        f"({', '.join(sorted(set(extensiones_invalidas)))}). Solo se aceptan los reportes del "
+                        f"sistema de exportación (código del centro, .xlsx, .xls, .csv o .dbf)."
                     )
                     resultado["valido"] = False
                 elif extensiones_invalidas:
@@ -518,6 +555,20 @@ class ZipProcessor:
             resultado["mensaje"] = f"Error al procesar el ZIP: {str(e)}"
             resultado["estado"] = "error"
             return resultado
+
+    def _rechazo_seguridad(self, resultado: Dict, problemas: List[Dict]) -> Dict:
+        """Marca el resultado como rechazado por seguridad y explica qué corregir."""
+        resultado["archivos_peligrosos"] = problemas
+        resultado["archivos_invalidos"] = [p["archivo"] for p in problemas if not p["archivo"].startswith("(")]
+        resultado["archivos_detalle"] = []
+        resultado["estado"] = "corrupto"
+        resultado["valido"] = False
+        resultado["mensaje"] = (
+            "Por seguridad no se aceptó el ZIP. " + seguridad.resumen_problemas(problemas) + ". "
+            "Genere nuevamente el ZIP solo con los reportes del sistema de exportación. "
+            "Si cree que es un error, comuníquese con la OIIS."
+        )
+        return resultado
 
     def validar_zip_desde_archivo(self, ruta_archivo: str) -> Dict:
         """
@@ -593,6 +644,15 @@ class ZipProcessor:
             archivos_extraidos = []
 
             with zipfile.ZipFile(io.BytesIO(archivo_bytes)) as zf:
+                problemas = seguridad.revisar_estructura(
+                    archivo_bytes, zf, self.extensiones_bloqueadas, 10 ** 9, 10 ** 18)
+                if problemas:
+                    return {
+                        "exito": False,
+                        "mensaje": "Por seguridad no se extrajo el ZIP: " + seguridad.resumen_problemas(problemas),
+                        "archivos_extraidos": [],
+                        "ruta_destino": ruta_destino,
+                    }
                 for archivo in zf.namelist():
                     # Evitar path traversal
                     nombre_seguro = self._sanitizar_ruta_zip(archivo)

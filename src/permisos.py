@@ -11,6 +11,7 @@ los tiene todos.
   RETIRO_REPOSITORIO  pedir el retiro de archivos del repositorio y eliminar duplicados
   RESPALDO_MANUAL     hacer un respaldo manual
   VER_AUDITORIA       ver el «Control de actividad»
+  CONFIGURACION       cambiar fechas, años, centros excluidos y carpetas de Drive (v7.5)
 """
 
 from datetime import datetime, timezone
@@ -24,6 +25,9 @@ PERMISOS = {
     "RETIRO_REPOSITORIO": ("Retiro del repositorio", "Pedir el retiro de archivos de Drive (lo aprueba oiis.winepi) y eliminar duplicados."),
     "RESPALDO_MANUAL": ("Respaldo manual", "Hacer un respaldo a la carpeta BACKUPS cuando lo necesite."),
     "VER_AUDITORIA": ("Ver auditoría", "Consultar el «Control de actividad» de todas las personas."),
+    "CONFIGURACION": ("Cambiar la configuración",
+                      "Cambiar la semana activa, la fecha de corte, los años, los centros excluidos y las carpetas de Drive. "
+                      "Cada cambio exige un motivo y queda registrado."),
 }
 
 
@@ -172,6 +176,16 @@ class Permisos:
             if not r:
                 return False, "No se pudo guardar el permiso."
         except Exception as e:
+            texto = str(e)
+            faltante = permiso == "CONFIGURACION" and ("check" in texto.lower() or "23514" in texto)
+            try:   # la constancia previa decía «otorgado»: se aclara que NO se pudo guardar
+                self.aud.registrar(actor["usuario"], "PERMISO_OTORGADO", "PERMISOS", rol=actor.get("rol"),
+                                   objeto=f"{usuario} · {permiso}", resultado="ERROR",
+                                   detalle={"destinatario": usuario, "permiso": permiso, "error": texto[:300]})
+            except Exception:
+                pass
+            if faltante:
+                return False, "Falta ejecutar sql/16_permiso_configuracion.sql en Supabase para poder asignar este permiso."
             return False, f"No se pudo guardar el permiso: {e}"
         self._avisar(adm, actor, "otorgado", permiso, redes, vence_en, nota)
         return True, "Permiso otorgado."

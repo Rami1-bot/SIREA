@@ -22,7 +22,8 @@ if CAPS:
 SECCIONES = ["Panel de control", "Seguimiento semanal", "Progreso por red", "Control de atrasos", "Control de duplicados",
              "Observaciones", "Informe por semana", "Descarga y limpieza", "Notificaciones", "Exclusión de centros", "Configuración",
              "Almacenamiento (Drive)", "Respaldos", "Administradores", "Solicitudes de contraseña", "Cuentas del panel",
-             "Credenciales de red", "Historial y logs", "Control de actividad", "Permisos de operación"]
+             "Credenciales de red", "Historial y logs", "Control de actividad", "Permisos de operación",
+             "Salud del sistema"]
 # SIREA 3.3: el orden importa (las rondas crean las propuestas de la Bandeja; los rechazos alimentan la mejora de procedimientos)
 PASOS_IA = [("Gobernanza de IA", "Cómo funciona"), ("Gobernanza de IA", "Encender y apagar"), ("Gobernanza de IA", "Evaluaciones"),
             ("Gobernanza de IA", "Rondas del agente"),
@@ -266,22 +267,26 @@ def flujo_filtro_y_f5(page, problemas, visitadas):
 
 
 def flujo_notificaciones(page, problemas, visitadas):
-    """SIREA 3.3: al elegir una red, el sistema sugiere a sus responsables y llena el formulario."""
+    """SIREA 3.4 (SIRE v7.4): al elegir una red, se proponen sus «Responsables conocidos» y la tabla de centros."""
     try:
         ir_a(page, "Notificaciones")
         main = page.locator("[data-testid='stMain']")
         elegir(page, main, "Red", "ANCASH")
-        elegir(page, main, "Responsables del envío", "example.org")
-        correo = page.get_by_label("Correo electrónico").first.input_value()
-        if "@example.org" not in correo:
-            problemas.append(f"Notificaciones: no se llenó el correo del responsable ({correo!r})")
-        revisar(page, "Notificaciones · responsable sugerido", problemas); visitadas.append("Notificaciones · autollenado")
+        page.get_by_role("button", name=re.compile("Buscar centros pendientes", re.I)).first.click()
+        esperar(page, 3)
+        texto = main.inner_text()
+        if "Responsables conocidos" not in texto:
+            problemas.append("Notificaciones: no aparecen los «Responsables conocidos» de la red")
+        if "centros marcados" not in texto:
+            problemas.append("Notificaciones: no aparece la tabla de centros pendientes")
+        revisar(page, "Notificaciones · responsables conocidos", problemas)
+        visitadas.append("Notificaciones · responsables conocidos")
         b = page.get_by_role("button", name=re.compile("Semana activa$"))
         if b.count():
             b.first.click(); esperar(page, 1)
         elegir(page, main, "Red", "Todas las redes")
     except Exception as e:  # noqa: BLE001
-        problemas.append(f"Notificaciones (autollenado): {type(e).__name__}: {str(e)[:120]}")
+        problemas.append(f"Notificaciones (responsables): {type(e).__name__}: {str(e)[:120]}")
 
 
 def main():
@@ -327,6 +332,17 @@ def main():
                 revisar(page, s, problemas); visitadas.append(s)
             except Exception as e:  # noqa: BLE001
                 problemas.append(f"{s}: no se pudo abrir ({type(e).__name__}: {str(e)[:80]})")
+
+        # SIREA 3.5: Salud del sistema, revisión completa con la base simulada
+        try:
+            ir_a(page, "Salud del sistema")
+            page.get_by_role("button", name=re.compile("Revisar ahora")).last.click()
+            esperar(page, 6)
+            if page.locator(".sirea-salud-fila").count() == 0:
+                problemas.append("Salud del sistema: la revisión no mostró resultados")
+            revisar(page, "Salud del sistema · revisión", problemas); visitadas.append("Salud del sistema · revisión")
+        except Exception as e:  # noqa: BLE001
+            problemas.append(f"Salud del sistema: {type(e).__name__}: {str(e)[:120]}")
 
         seccion_actual = None
         for sec, t in PASOS_IA:

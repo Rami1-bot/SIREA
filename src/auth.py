@@ -309,12 +309,18 @@ class AuthManager:
             del self._sesiones_activas[token]
             return False
 
-        # SIREA: expiración por inactividad.
+        # Cierre por inactividad (SIREA + SIRE v7.5): una PC compartida no debe dejar el panel abierto.
         ultima = sesion.get('ultima_actividad') or inicio
         if datetime.now() - ultima > timedelta(minutes=Config.SESION_INACTIVIDAD_MINUTOS):
+            usuario = sesion.get('usuario', '')
             del self._sesiones_activas[token]
+            try:
+                self.db.registrar_log(usuario=usuario, accion='SESION_INACTIVIDAD',
+                                      detalle=f'Sesión cerrada por {Config.SESION_INACTIVIDAD_MINUTOS} min sin actividad')
+            except Exception:
+                pass
             return False
-        
+
         # Actualizar última actividad
         sesion['ultima_actividad'] = datetime.now()
         

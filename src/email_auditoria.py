@@ -238,6 +238,43 @@ def enviar_acuse_duplicados(sender, db, actor_usuario: str, actor_nombre: str, i
     return _enviar_a(sender, db, actor_usuario, asunto, construir)
 
 
+# ---------------------------------------------------------------- configuración
+
+def enviar_aviso_configuracion(sender, db, actor_usuario: str, actor_nombre: str, info: Dict) -> int:
+    """
+    Aviso de un cambio de configuración (fechas, años, centros excluidos, carpetas de Drive).
+    info: titulo, objeto, cambios [(campo, antes, despues)], motivo, cuando, alertas.
+    Lo reciben quien lo hizo y el SUPER_ADMIN principal.
+    """
+    titulo = info.get("titulo") or "Cambio de configuración"
+    asunto = f"{titulo} – SIREA"
+
+    def construir(p, es_actor):
+        intro = (f"Por medio del presente, se deja constancia de que <strong>{_esc(actor_nombre)}</strong> realizó "
+                 f"el siguiente cambio de configuración: <strong>{_esc(titulo)}</strong>.")
+        filas = [("Responsable", f"{_esc(actor_nombre)} ({_esc(actor_usuario)})"),
+                 ("Fecha y hora", f"{_esc(info.get('cuando'))} (hora de Lima)")]
+        if info.get("objeto"):
+            filas.append(("Sobre", _esc(info["objeto"])))
+        filas.append(("Motivo", _multilinea(info.get("motivo") or "")))
+        cuerpo = P.tabla_desde_pares(filas)
+        cambios = info.get("cambios") or []
+        if cambios:
+            cuerpo += P.bloque_titulo("Qué cambió")
+            cuerpo += P.lista([f"<strong>{_esc(c)}</strong>: {_esc(a) or '—'} → {_esc(d) or '—'}" for c, a, d in cambios[:40]])
+        cuerpo += _alertas_html(info.get("alertas") or [])
+        cuerpo += P.caja_aviso("info", "Si usted no reconoce este cambio",
+                               "Comuníquese con la OIIS. Todo cambio de configuración queda en el «Control de actividad» "
+                               "con el valor anterior y el nuevo.")
+        html_ = P.envolver("ambar", "Configuración", titulo, P.saludo(_esc(p["nombre"]), intro), cuerpo)
+        lineas = "\n".join(f"- {c}: {a or '—'} -> {d or '—'}" for c, a, d in cambios[:40])
+        plano = (f"CAMBIO DE CONFIGURACIÓN\n\n{titulo}\nResponsable: {actor_nombre} ({actor_usuario})\n"
+                 f"Fecha: {info.get('cuando')}\nMotivo: {info.get('motivo')}\n{lineas}")
+        return html_, plano
+
+    return _enviar_a(sender, db, actor_usuario, asunto, construir)
+
+
 # ---------------------------------------------------------------- permisos
 
 def enviar_aviso_permiso(sender, adm: Dict, actor: Dict, tipo: str, permiso_nombre: str, redes, vence_en, nota) -> Tuple[bool, str]:
@@ -265,3 +302,48 @@ def enviar_aviso_permiso(sender, adm: Dict, actor: Dict, tipo: str, permiso_nomb
         return sender._enviar_correo(correo, f"Permiso {'otorgado' if otorgado else 'retirado'}: {permiso_nombre} – SIREA", html_, plano, bcc=bcc)
     except TypeError:
         return sender._enviar_correo(correo, f"Permiso {'otorgado' if otorgado else 'retirado'}: {permiso_nombre} – SIREA", html_, plano)
+
+
+# ---------------------------------------------------------------- solicitudes de permiso (v7.6)
+
+def enviar_aviso_solicitud_permiso(sender, db, sol: Dict, permiso_nombre: str) -> int:
+    """Avisa al SUPER_ADMIN principal que alguien pidió un permiso."""
+    p = _persona(db, Config.SUPERADMIN_PRINCIPAL)
+    if not p:
+        return 0
+    quien = sol.get("nombre") or sol.get("usuario")
+    intro = (f"Por medio del presente, le comunicamos que <strong>{_esc(quien)}</strong> solicita el permiso "
+             f"<strong>{_esc(permiso_nombre)}</strong>.")
+    cuerpo = P.tabla_desde_pares([("Solicitante", f"{_esc(quien)} ({_esc(sol.get('usuario'))})"),
+                                  ("Permiso", _esc(permiso_nombre)),
+                                  ("Fecha y hora", f"{_esc(sol.get('cuando'))} (hora de Lima)")])
+    cuerpo += P.caja_aviso("info", "Mensaje", _multilinea(sol.get("mensaje") or ""))
+    cuerpo += P.caja_aviso("warn", "Qué hacer",
+                           "Ingrese al SIREA, sección <strong>Permisos de operación</strong>, y apruebe o rechace la solicitud. "
+                           "Si no reconoce a la persona o el motivo, rechácela.")
+    html_ = P.envolver("azul", "Permisos", "Solicitud de permiso", P.saludo(_esc(p["nombre"]), intro), cuerpo)
+    plano = (f"SOLICITUD DE PERMISO\n\nSolicitante: {quien} ({sol.get('usuario')})\nPermiso: {permiso_nombre}\n"
+             f"Fecha: {sol.get('cuando')}\nMensaje: {sol.get('mensaje')}\n")
+    ok, _ = _enviar(sender, p, f"Solicitud de permiso: {permiso_nombre} – SIREA", html_, plano)
+    return 1 if ok else 0
+
+
+def enviar_respuesta_solicitud_permiso(sender, db, sol: Dict, permiso_nombre: str, aprobada: bool,
+                                       por_nombre: str, respuesta: str) -> int:
+    """Avisa a la persona que su solicitud fue rechazada o cancelada (la aprobación ya envía el aviso de permiso otorgado)."""
+    p = _persona(db, sol.get("usuario"))
+    if not p:
+        return 0
+    intro = (f"Por medio del presente, le informamos que su solicitud del permiso <strong>{_esc(permiso_nombre)}</strong> "
+             f"fue <strong>{'aprobada' if aprobada else 'rechazada'}</strong> por {_esc(por_nombre)}.")
+    cuerpo = P.tabla_desde_pares([("Permiso", _esc(permiso_nombre)), ("Resultado", "Aprobada" if aprobada else "Rechazada")])
+    if (respuesta or "").strip():
+        cuerpo += P.caja_aviso("info", "Respuesta", _multilinea(respuesta))
+    if not aprobada:
+        cuerpo += P.caja_aviso("info", "Si lo necesita",
+                               "Puede enviar una nueva solicitud explicando mejor el motivo, o comunicarse con la OIIS.")
+    html_ = P.envolver("azul" if aprobada else "ambar", "Permisos", "Respuesta a su solicitud",
+                       P.saludo(_esc(p["nombre"]), intro), cuerpo)
+    plano = f"RESPUESTA A SU SOLICITUD\n\n{permiso_nombre}: {'aprobada' if aprobada else 'rechazada'}\n{respuesta or ''}\n"
+    ok, _ = _enviar(sender, p, f"Respuesta a su solicitud: {permiso_nombre} – SIREA", html_, plano)
+    return 1 if ok else 0

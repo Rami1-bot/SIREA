@@ -33,10 +33,12 @@ from src.config import Config
 LIMA = timezone(timedelta(hours=-5))
 FORMATO = "%Y-%m-%d %H:%M:%S"
 TABLAS = ("envios", "configuracion", "centros_excluidos", "anios_epidemiologicos", "redes", "cierres_corte",
-          "auditoria_acciones", "permisos_operaciones", "descargas_masivas", "solicitudes_retiro", "retiros_archivos")
+          "auditoria_acciones", "permisos_operaciones", "descargas_masivas", "solicitudes_retiro", "retiros_archivos",
+          "observaciones_envio", "responsables_red", "solicitudes_permiso")      # SIREA 3.4 (sql/13, 15, 17)
 # Tablas que pueden no existir todavía (se omiten sin fallar el respaldo).
 TABLAS_OPCIONALES = ("redes", "cierres_corte", "auditoria_acciones", "permisos_operaciones",
-                     "descargas_masivas", "solicitudes_retiro", "retiros_archivos")
+                     "descargas_masivas", "solicitudes_retiro", "retiros_archivos",
+                     "observaciones_envio", "responsables_red", "solicitudes_permiso")
 MAX_INTENTOS = 3
 ESPERA_REINTENTO_MIN = 30
 PAGINA = 1000

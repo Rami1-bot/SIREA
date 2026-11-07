@@ -4,7 +4,8 @@ Notificaciones y Recordatorios
 Permite enviar recordatorios a los responsables de las redes.
 """
 
-import re
+import time
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -14,7 +15,10 @@ from src.db_manager import get_db_manager
 from src.data_loader import get_data_loader
 from src.email_sender import get_email_sender
 from src.config import Config
-from app_pages.admin_helpers import requerir_admin
+from src.responsables_red import get_responsables_red, ORIGEN_REGISTRADO
+from src.validacion_correo import formato_valido, normalizar
+from app_pages.admin_helpers import requerir_admin, actor_actual
+from src.auditoria import get_auditoria
 from src.agentes.acciones import detalle_log_recordatorio
 from utils.tema import mostrar, aviso, seccion, chip
 from utils.tema_admin import esc, panel_cab
@@ -166,69 +170,272 @@ _TIPO_RECORDATORIO = {
 }
 
 
-_RE_CORREO = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
+def _fijar_seleccion(todos: bool, filas):
+    st.session_state.notif_sel = set(filas) if todos else set()
+    st.session_state.notif_ver = st.session_state.get('notif_ver', 0) + 1
 
 
-def _copias(texto: str, principal: str = "") -> list:
-    """Correos válidos en copia, sin repetir y sin el destinatario principal (máximo 5)."""
-    vistos, out = {str(principal or "").strip().lower()}, []
-    for c in re.split(r"[,;\s]+", str(texto or "")):
-        c = c.strip().lower()
-        if c and _RE_CORREO.match(c) and c not in vistos:
-            vistos.add(c)
-            out.append(c)
-    return out[:5]
+def _tabla_centros(pendientes: dict) -> list:
+    """Tabla de centros pendientes con casilla «Incluir», búsqueda y filtro por red. Devuelve los nombres marcados."""
+    filas = [(r, c) for r, lista in pendientes.items() for c in lista]
+    sel = st.session_state.setdefault('notif_sel', set(filas))
+    sel &= set(filas)                                        # por si cambió la lista
+    ver = st.session_state.get('notif_ver', 0)
+
+    with st.container(key="tnav_notif"):
+        c1, c2 = st.columns([2.2, 1.2], gap="medium", vertical_alignment="bottom")
+        with c1:
+            consulta = st.text_input("Buscar centro", key="notif_q", placeholder="Escriba para buscar",
+                                     icon=":material/search:")
+        with c2:
+            if len(pendientes) > 1:
+                red_f = st.selectbox("Ver solo una red", ["Todas"] + list(pendientes), key="notif_f_red")
+            else:
+                red_f = "Todas"
+        b1, b2, _ = st.columns([1.6, 1.6, 1.4], gap="small")
+        with b1:
+            st.button("Marcar todos", key="notif_marcar_todos", icon=":material/done_all:",
+                      on_click=_fijar_seleccion, args=(True, filas), use_container_width=True)
+        with b2:
+            st.button("Quitar todos", key="notif_quitar_todos", icon=":material/remove_done:",
+                      on_click=_fijar_seleccion, args=(False, filas), use_container_width=True)
+
+    q = (consulta or "").strip().lower()
+    visibles = [(r, c) for r, c in filas
+                if (red_f == "Todas" or r == red_f) and (not q or all(t in f"{r} {c}".lower() for t in q.split()))]
+    if not visibles:
+        mostrar('<div class="sire-vacio">Ningún centro coincide con la búsqueda.</div>')
+    else:
+        df = pd.DataFrame({
+            "Incluir": [(r, c) in sel for r, c in visibles],
+            "Red": [r for r, _ in visibles],
+            "Centro": [c for _, c in visibles],
+        })
+        editado = st.data_editor(
+            df, hide_index=True, use_container_width=True, disabled=["Red", "Centro"],
+            height=min(420, 40 + 36 * len(df)),
+            column_config={"Incluir": st.column_config.CheckboxColumn("Incluir", width="small")},
+            key=f"notif_ed_{ver}_{abs(hash((q, red_f)))}",
+        )
+        for (r, c), marcado in zip(visibles, editado["Incluir"].tolist()):
+            if marcado:
+                sel.add((r, c))
+            else:
+                sel.discard((r, c))
+    marcados = [c for r, c in filas if (r, c) in sel]
+    st.caption(f"{len(marcados)} de {len(filas)} centros marcados. La selección se conserva al buscar o filtrar.")
+    return marcados
 
 
-def _copias_invalidas(texto: str) -> list:
-    return [c for c in re.split(r"[,;\s]+", str(texto or "")) if c.strip() and not _RE_CORREO.match(c.strip())]
+def _lista_responsables(red: str) -> list:
+    """Responsables de la red (guardados + detectados en envíos), con memoria de 60 s."""
+    cache = st.session_state.get('notif_resp_cache')
+    if cache and cache[0] == red and time.time() - cache[1] < 60:
+        return cache[2]
+    lista = get_responsables_red().combinados(red) if red and red != "Todas" else []
+    st.session_state.notif_resp_cache = (red, time.time(), lista)
+    return lista
 
 
-def _llenar_responsable(red: str):
-    """SIREA 3.3: llena el formulario con la persona elegida y pone en copia a los demás responsables."""
-    lista = st.session_state.get("_notif_resp_lista") or []
-    elegido = st.session_state.get("notif_resp_sel")
-    por_correo = {r["correo"]: r for r in lista}
-    r = por_correo.get(elegido)
-    if not r:
+def _centros_por_destino(destinos: list, centros: list, por_centro: bool) -> list:
+    """[(destino, centros)]: todos reciben todo, o cada uno solo los centros que atiende (el resto va al primero)."""
+    if not por_centro or len(destinos) < 2:
+        return [(d, list(centros)) for d in destinos]
+    asignados = [[c for c in centros if c in set(d.get('centros') or [])] for d in destinos]
+    sueltos = [c for c in centros if not any(c in a for a in asignados)]
+    asignados[0] = [c for c in centros if c in set(asignados[0]) or c in sueltos]
+    return [(d, a) for d, a in zip(destinos, asignados) if a]
+
+
+def _paso_envio(db_manager, email_sender, *, red, anio, semana, semana_activa, anio_activo, estado_semana,
+                fecha_corte_str, busqueda, clave_busqueda, centros, resumen_ph):
+    resp_obj = get_responsables_red()
+    ver_m = st.session_state.get('notif_m_ver', 0)
+    k = lambda n: f"notif_m_{n}_{ver_m}"            # noqa: E731  (claves del formulario manual)
+
+    resultado = st.session_state.get('notif_resultado')
+    if resultado:
+        for tipo, titulo, texto in resultado:
+            mostrar(aviso(tipo, titulo, texto))
+
+    responsables = _lista_responsables(red)
+    elegidos = []
+    if red == "Todas":
+        st.caption("Con «Todas» las redes no hay responsables que proponer: escriba el destinatario más abajo.")
+    elif not responsables:
+        st.caption("Aún no hay responsables conocidos de esta red. Escriba uno abajo y, si quiere, guárdelo.")
+    else:
+        st.markdown(f"**Responsables conocidos de {esc(red)}**")
+        st.caption("Salen de los envíos anteriores y de los que usted guardó. Marque a quién enviar; "
+                   "por defecto va la persona que envió más recientemente.")
+        for i, p in enumerate(responsables):
+            with st.container(key=f"resp_card_{i}"):
+                c1, c2 = st.columns([0.07, 1], vertical_alignment="top")
+                with c1:
+                    marcado = st.checkbox(f"Enviar a {p['nombre']} {p['apellido']}", value=(i == 0),
+                                          key=f"notif_resp_{red}_{p['correo']}", label_visibility="collapsed")
+                with c2:
+                    etiq_origen = chip(p['origen'], "ok" if p['origen'] == ORIGEN_REGISTRADO else "info")
+                    reciente = chip("Más reciente", "info") if i == 0 and p.get('ultimo_envio') else ""
+                    ult = f" · último envío {esc(p['ultimo_envio_txt'])}" if p.get('ultimo_envio_txt') else ""
+                    cen = ""
+                    if p.get('centros'):
+                        vistos = p['centros'][:3]
+                        extra = f" y {len(p['centros']) - 3} más" if len(p['centros']) > 3 else ""
+                        cen = f'<div class="sire-resp-c">Reportó: {esc(", ".join(vistos))}{esc(extra)}</div>'
+                    mostrar(
+                        f'<div class="sire-resp"><b>{esc(p["nombre"])} {esc(p["apellido"])}</b> {etiq_origen} {reciente}'
+                        f'<div class="sire-resp-m">{esc(p["correo"])}{ult}</div>{cen}</div>')
+            if marcado:
+                elegidos.append(p)
+        if any(p.get('centros') for p in elegidos) and len(elegidos) > 1:
+            por_centro = st.toggle("Enviar a cada responsable solo los centros que atiende", value=False,
+                                   key="notif_por_centro",
+                                   help="Los centros que nadie atiende van al primer responsable marcado.")
+        else:
+            por_centro = False
+        registrados = [p for p in responsables if p['origen'] == ORIGEN_REGISTRADO]
+        if registrados:
+            with st.expander("Quitar a un responsable guardado"):
+                for p in registrados:
+                    a, b = st.columns([3, 1], vertical_alignment="center")
+                    a.markdown(f"{esc(p['nombre'])} {esc(p['apellido'])} · {esc(p['correo'])}")
+                    if b.button("Quitar", key=f"notif_quitar_{p['correo']}", icon=":material/delete:",
+                                use_container_width=True):
+                        if resp_obj.quitar(red, p['correo']):
+                            st.session_state.pop('notif_resp_cache', None)
+                            st.toast("Responsable quitado de la lista.", icon=":material/check_circle:")
+                            st.rerun()
+    if red == "Todas" or not responsables:
+        por_centro = False
+
+    st.markdown("**Otra persona**" if responsables else "**Destinatario**")
+    f1, f2 = st.columns(2)
+    with f1:
+        nombre = st.text_input("Nombre del responsable", key=k("nombre"))
+    with f2:
+        apellido = st.text_input("Apellido del responsable", key=k("apellido"))
+    f3, f4 = st.columns([1.6, 1])
+    with f3:
+        correo = st.text_input("Correo electrónico", key=k("correo"))
+    with f4:
+        telefono = st.text_input("Teléfono (opcional)", placeholder="9XX XXX XXX", key=k("telefono"))
+    guardar = False
+    if red != "Todas":
+        guardar = st.checkbox(f"Guardar como responsable de {red} para próximos envíos", value=True, key=k("guardar"))
+
+    manual_escrito = any(x.strip() for x in (nombre, apellido, correo))
+    destinos = [dict(p) for p in elegidos]
+    error = None
+    if manual_escrito:
+        if not nombre.strip() or not apellido.strip() or not correo.strip():
+            error = ("Faltan datos", "Complete nombre, apellido y correo de la otra persona, o borre lo escrito.")
+        elif not formato_valido(correo):
+            error = ("Correo electrónico inválido", "Revise que el correo esté bien escrito.")
+        elif normalizar(correo) not in {d['correo'] for d in destinos}:
+            destinos.append({'nombre': nombre.strip(), 'apellido': apellido.strip(), 'correo': normalizar(correo),
+                             'centros': [], 'manual': True})
+
+    # SIREA 3.3: con varias personas y todos los centros, se puede mandar UN solo correo con los demás en copia.
+    en_copia = False
+    if len(destinos) > 1 and not por_centro:
+        en_copia = st.toggle("Un solo correo: el primero como destinatario y los demás en copia", value=False,
+                             key="notif_en_copia",
+                             help="Así todos ven que el aviso llegó al equipo de la red. Si lo deja apagado, "
+                                  "cada persona recibe su propio correo.")
+
+    reparto = _centros_por_destino(destinos, centros, por_centro) if destinos else []
+
+    # resumen lateral
+    with resumen_ph.container():
+        filas = [("Semana", f"{semana} · {anio}"), ("Red", red), ("Centros marcados", str(len(centros))),
+                 ("Destinatarios", str(len(destinos)))]
+        celdas = "".join(f'<div class="sire-res-k">{esc(a)}</div><div class="sire-res-v">{esc(b)}</div>' for a, b in filas)
+        quienes = "".join(f"<li>{esc(d['nombre'])} {esc(d['apellido'])} <span>{esc(d['correo'])}</span></li>" for d in destinos)
+        mostrar(f'<div class="sire-card"><div class="sire-card-h">Resumen del envío</div><div class="sire-card-b">'
+                f'<div class="sire-res">{celdas}</div>'
+                + (f'<ul class="sire-res-l">{quienes}</ul>' if quienes else '')
+                + '</div></div>')
+
+    enviar = st.button("Enviar recordatorio", type="primary", icon=":material/mail:", key="notif_enviar")
+    remitente = getattr(Config, 'EMAIL_REMITENTE', '') or 'la cuenta institucional'
+    st.caption(f"Se enviará desde {remitente}.")
+    if not enviar:
         return
-    nombres, apellidos = r.get("nombres") or "", r.get("apellidos") or ""
-    if not (nombres or apellidos):
-        partes = str(r.get("nombre") or "").split(" ", 1)
-        nombres, apellidos = partes[0], (partes[1] if len(partes) > 1 else "")
-    st.session_state["notif_dest_nombre"] = nombres
-    st.session_state["notif_dest_apellido"] = apellidos
-    st.session_state["notif_dest_correo"] = r["correo"]
-    st.session_state["notif_dest_cc"] = ", ".join(x["correo"] for x in lista if x["correo"] != r["correo"])
 
+    if error:
+        mostrar(aviso("bad", *error))
+        return
+    if not destinos:
+        mostrar(aviso("bad", "Falta el destinatario", "Marque a un responsable o escriba los datos de otra persona."))
+        return
+    if not busqueda or busqueda['clave'] != clave_busqueda:
+        mostrar(aviso("warn", "Busque primero los centros pendientes",
+                      "La lista de centros debe corresponder a la semana y red elegidas."))
+        return
+    if not centros:
+        mostrar(aviso("warn", "No hay centros marcados",
+                      "Marque al menos un centro pendiente para enviar el recordatorio."))
+        return
 
-def _sugerir_responsables(red: str):
-    """Quiénes enviaron de verdad por la red en las últimas 8 semanas (lo calcula el sistema, sin IA)."""
-    if not red or red == "Todas":
-        st.caption("Elija una red en el paso 1 y el sistema le sugerirá a sus responsables del envío.")
+    tipo = "ATRASADO" if estado_semana['tipo'] == 'atrasado' else "PREVENTIVO"
+    actor_cta = actor_actual()                                  # sesión validada en el servidor
+    actor = actor_cta.get('usuario') or 'admin'
+
+    # v7.5: topes para que una sola cuenta no pueda inundar de correos a las redes.
+    aud = get_auditoria()
+    if len(reparto) > Config.NOTIF_MAX_DESTINATARIOS:
+        mostrar(aviso("bad", "Demasiados destinatarios en un solo envío",
+                      f"Este envío llegaría a {len(reparto)} personas; el máximo por envío es {Config.NOTIF_MAX_DESTINATARIOS}. "
+                      "Envíelo por partes (por red)."))
         return
-    try:
-        from src.agentes.acciones import responsables_de_red
-        lista = responsables_de_red(red, semanas=8, maximo=5)
-    except Exception:  # noqa: BLE001
-        lista = []
-    if not lista:
-        st.caption(f"No hay envíos de {esc(red)} en las últimas 8 semanas: escriba los datos a mano.")
+    ya_enviados = aud.correos_enviados_recientes(actor, 60)
+    if ya_enviados + len(reparto) > Config.NOTIF_MAX_CORREOS_HORA:
+        aud.registrar(actor, "NOTIFICACION_LIMITE", "NOTIFICACIONES", rol=actor_cta.get('rol'),
+                      objeto=f"{red} · semana {semana}/{anio}", resultado="RECHAZADO",
+                      detalle={"ya_enviados_ultima_hora": ya_enviados, "pedidos": len(reparto),
+                               "tope": Config.NOTIF_MAX_CORREOS_HORA})
+        mostrar(aviso("warn", "Alcanzó el tope de correos por hora",
+                      f"En la última hora su cuenta envió {ya_enviados} correo(s) y el tope es {Config.NOTIF_MAX_CORREOS_HORA}. "
+                      "Intente de nuevo más tarde."))
         return
-    st.session_state["_notif_resp_lista"] = lista
-    opciones = [None] + [r["correo"] for r in lista]
-    por_correo = {r["correo"]: r for r in lista}
-    if st.session_state.get("notif_resp_sel") not in opciones or st.session_state.get("_notif_resp_red") != red:
-        st.session_state["notif_resp_sel"] = None
-        st.session_state["_notif_resp_red"] = red
-    st.selectbox(
-        f"Responsables del envío de {red} (según quién envió en las últimas 8 semanas)", options=opciones,
-        key="notif_resp_sel", on_change=_llenar_responsable, args=(red,),
-        format_func=lambda c: "Elija para llenar el formulario…" if c is None else
-        f"{por_correo[c]['nombre']} · {c} · {por_correo[c]['envios']} envío(s), último {por_correo[c]['ultimo']}",
-    )
-    st.caption("Al elegir a una persona se llenan nombre, apellido y correo, y los demás responsables quedan en copia. "
-               "Puede corregir cualquier dato antes de enviar.")
+    salida, enviados = [], 0
+    nombre_red = red if red != "Todas" else "Todas las redes"
+    if en_copia and reparto:
+        tandas = [(reparto[0][0], reparto[0][1], [d['correo'] for d, _ in reparto[1:]])]
+    else:
+        tandas = [(d, cs, None) for d, cs in reparto]
+    with st.spinner("Enviando recordatorio..."):
+        for d, cs, cc in tandas:
+            exito, mensaje = email_sender.enviar_recordatorio(
+                destinatario=d['correo'], nombre_usuario=f"{d['nombre']} {d['apellido']}".strip(),
+                red=nombre_red, semana=semana,
+                fecha_limite=fecha_corte_str, centros_pendientes=cs, anio=anio,
+                semana_actual=semana_activa, anio_actual=anio_activo, tipo=tipo, cc=cc or None)
+            if exito:
+                enviados += 1 + len(cc or [])
+                copia = f" con copia a {esc(', '.join(cc))}" if cc else ""
+                salida.append(("ok", "Recordatorio enviado", f"Se envió a {esc(d['correo'])}{copia} ({len(cs)} centros)."))
+                # Formato único del log (lo lee el Agente de IA para no repetir recordatorios).
+                db_manager.registrar_log(
+                    usuario=actor, accion='ENVIO_RECORDATORIO',
+                    detalle=detalle_log_recordatorio(d['correo'], nombre_red, semana, anio, tipo))
+            else:
+                salida.append(("bad", f"No se pudo enviar a {esc(d['correo'])}", esc(mensaje)))
+    aud.registrar(actor, "NOTIFICACION_ENVIADA", "NOTIFICACIONES", rol=actor_cta.get('rol'),
+                  objeto=f"{red} · semana {semana}/{anio}", resultado="OK" if enviados == len(reparto) else "ERROR",
+                  detalle={"tipo": tipo, "n_destinatarios": len(reparto), "n_ok": enviados,
+                           "n_error": len(reparto) - enviados, "correos": [d['correo'] for d, _ in reparto][:40],
+                           "centros": sum(len(cs) for _, cs in reparto)})
+    if guardar and enviados and manual_escrito and not error and red != "Todas":
+        ok_g, msg_g = resp_obj.guardar(red, nombre, apellido, correo, telefono, actor)
+        salida.append(("ok" if ok_g else "warn", "Responsable guardado" if ok_g else "No se guardó al responsable",
+                       "Quedará propuesto en los próximos envíos de esta red." if ok_g else esc(msg_g)))
+        st.session_state.pop('notif_resp_cache', None)
+    st.session_state.notif_resultado = salida
+    if enviados:
+        st.session_state.notif_m_ver = ver_m + 1            # limpia el formulario manual
+    st.rerun()
 
 
 def mostrar_notificaciones():
@@ -314,6 +521,9 @@ def mostrar_notificaciones():
             pendientes = _pendientes_por_red(
                 db_manager, data_loader, anio_seleccionado, semana_seleccionada, redes_a_procesar)
         st.session_state.notif_busqueda = {'clave': clave_busqueda, 'pendientes': pendientes}
+        st.session_state.notif_sel = {(r, c) for r, lista in pendientes.items() for c in lista}
+        st.session_state.notif_ver = st.session_state.get('notif_ver', 0) + 1
+        st.session_state.pop('notif_resultado', None)
 
     busqueda = st.session_state.get('notif_busqueda')
 
@@ -339,81 +549,22 @@ def mostrar_notificaciones():
                                   f"Semana {semana_seleccionada} de {anio_seleccionado}."))
                 else:
                     seccion(2, f"Centros pendientes ({total})")
-                    st.caption("Marque los centros que incluirá el recordatorio.")
-                    for red, lista in pendientes.items():
-                        st.markdown(f"**{red}** · {len(lista)} pendientes")
-                        for centro in lista:
-                            if st.checkbox(centro, value=True, key=f"notif_chk_{red}_{centro}"):
-                                centros_a_enviar.append(centro)
+                    centros_a_enviar = _tabla_centros(pendientes)
 
     # ============================================================
-    # PASO 3: DESTINATARIO
+    # PASO 3: RESPONSABLES Y ENVIO
     # ============================================================
+    with col_side:
+        resumen_ph = st.empty()
+
     with col_main:
         with st.container(key="sec_notif_3"):
-            seccion(3, "Destinatario")
-            _sugerir_responsables(red_seleccionada)
-            with st.form("form_enviar_recordatorio", border=False):
-                f1, f2 = st.columns(2)
-                with f1:
-                    nombre_destinatario = st.text_input("Nombre del responsable", key="notif_dest_nombre")
-                with f2:
-                    apellido_destinatario = st.text_input("Apellido del responsable", key="notif_dest_apellido")
-                f3, f4 = st.columns([1.6, 1])
-                with f3:
-                    correo_destinatario = st.text_input("Correo electrónico", key="notif_dest_correo")
-                with f4:
-                    telefono_destinatario = st.text_input("Teléfono (opcional)", placeholder="9XX XXX XXX")
-                copias_txt = st.text_input("En copia (opcional; otros responsables de la red, separados por comas)",
-                                           key="notif_dest_cc")
-
-                enviar = st.form_submit_button("Enviar recordatorio", type="primary",
-                                               icon=":material/mail:")
-
-        if enviar:
-            if not nombre_destinatario or not apellido_destinatario or not correo_destinatario:
-                mostrar(aviso("bad", "Faltan datos", "Complete nombre, apellido y correo del responsable."))
-            elif '@' not in correo_destinatario:
-                mostrar(aviso("bad", "Correo electrónico inválido"))
-            elif _copias_invalidas(copias_txt):
-                mostrar(aviso("bad", "Revise los correos en copia", esc(", ".join(_copias_invalidas(copias_txt)), 200)))
-            elif not busqueda or busqueda['clave'] != clave_busqueda:
-                mostrar(aviso("warn", "Busque primero los centros pendientes",
-                              "La lista de centros debe corresponder a la semana y red elegidas."))
-            elif not centros_a_enviar:
-                mostrar(aviso("warn", "No hay centros marcados",
-                              "Marque al menos un centro pendiente para enviar el recordatorio."))
-            else:
-                with st.spinner("Enviando recordatorio..."):
-                    tipo = "ATRASADO" if estado_semana['tipo'] == 'atrasado' else "PREVENTIVO"
-
-                    exito, mensaje = email_sender.enviar_recordatorio(
-                        destinatario=correo_destinatario,
-                        nombre_usuario=f"{nombre_destinatario} {apellido_destinatario}",
-                        red=red_seleccionada if red_seleccionada != "Todas" else "Todas las redes",
-                        semana=semana_seleccionada,
-                        fecha_limite=fecha_corte_str,
-                        centros_pendientes=centros_a_enviar,
-                        anio=anio_seleccionado,
-                        semana_actual=semana_activa,
-                        anio_actual=anio_activo,
-                        tipo=tipo,
-                        cc=_copias(copias_txt, correo_destinatario) or None,
-                    )
-
-                    if exito:
-                        cc_ok = _copias(copias_txt, correo_destinatario)
-                        mostrar(aviso("ok", "Recordatorio enviado", f"Se envió a {esc(correo_destinatario)}"
-                                      + (f" con copia a {esc(', '.join(cc_ok), 200)}" if cc_ok else "") + "."))
-                        db_manager.registrar_log(
-                            usuario=st.session_state.admin_usuario.get('usuario', 'admin'),
-                            accion='ENVIO_RECORDATORIO',
-                            detalle=detalle_log_recordatorio(
-                                correo_destinatario, red_seleccionada if red_seleccionada != "Todas" else "Todas las redes",
-                                semana_seleccionada, anio_seleccionado, tipo)
-                        )
-                    else:
-                        mostrar(aviso("bad", "No se pudo enviar el correo", esc(mensaje)))
-        else:
-            remitente = getattr(Config, 'EMAIL_REMITENTE', '') or 'la cuenta institucional'
-            st.caption(f"Se enviará desde {remitente}.")
+            seccion(3, "Responsables y envío")
+            _paso_envio(
+                db_manager, email_sender,
+                red=red_seleccionada, anio=anio_seleccionado, semana=semana_seleccionada,
+                semana_activa=semana_activa, anio_activo=anio_activo,
+                estado_semana=estado_semana, fecha_corte_str=fecha_corte_str,
+                busqueda=busqueda, clave_busqueda=clave_busqueda,
+                centros=centros_a_enviar, resumen_ph=resumen_ph,
+            )

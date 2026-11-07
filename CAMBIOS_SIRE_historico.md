@@ -292,3 +292,150 @@ Sin cambios de base de datos. Reconstruir con `docker compose up -d --build`.
 **Para quien envía:** si el reemplazo no pudo completarse, ve un mensaje neutro («Reemplazo en proceso… la OIIS completará el reemplazo»), sin códigos ni errores técnicos. En «Mi progreso» las fallas técnicas no aparecen.
 
 **Base de datos (opcional, recomendado):** ejecutar `sql/14_observaciones_categorias.sql` (agrega el motivo FALLA y la columna `datos`; reclasifica como falla las que ya quedaron registradas como «Reemplazo»). Sin esto todo funciona, pero las fallas aparecen como «Reemplazo» y no se pueden reintentar.
+
+## v7.2.1 — Aviso «sel_semana … default value» en la consola
+
+Al usar el botón «Usar semana X/AAAA» (o al cambiar de año), Streamlit imprimía en la consola «The widget with key "sel_semana" was created with a default value but also had its value set via the Session State API». Era un aviso, no un error, pero ensuciaba el registro. Ahora Año y Semana solo reciben su valor inicial mientras no tengan uno guardado, y si el valor guardado deja de existir en la lista se restablece solo. Solo cambia `app_pages/usuario.py`.
+
+## v7.3 — Contraseña más amable para las redes, con ayuda en tiempo real, y tablas navegables en «Mi progreso»
+
+**Contraseña de las redes (perfil «red», en `src/password_policy.py`)** — el panel de administración conserva la política estricta; las redes tienen una más amable que mantiene lo que sí protege:
+- Mínimo **8 caracteres** (antes 10) y **letras + al menos un número**. Con **12 o más caracteres** (una frase) ya no se pide el número.
+- Ya no se exigen mayúsculas, minúsculas ni símbolo.
+- Se mantienen: no ser una contraseña común (123456, Essalud2026…), no contener el nombre de la red ni palabras como «EsSalud»/«OIIS», y sin secuencias ni repeticiones (1234, abcd, aaaa).
+- La contraseña temporal que entrega la OIIS sigue generándose con la política estricta; cuando la red elige la suya se aplica el perfil «red» (también en el servidor: `RedAuthManager.cambiar_password_propio`).
+- Botón **«Sugerir una contraseña fácil de recordar»**: cuatro palabras y dos números (por ejemplo `costa-rosa-globo-cueva-87`), sin tildes ni ñ, que siempre cumple el perfil.
+
+**Cambio de contraseña con requisitos en tiempo real** (`utils/cuentas_ui.py`, `components/password_vivo.js`):
+- Campos a la izquierda y el panel «Su contraseña debe cumplir» a la derecha. Cada requisito pasa a verde **mientras se escribe**; si algo está mal (por ejemplo contiene el nombre de la red), aparece en rojo con la explicación. Incluye barra de fortaleza, «le faltan N caracteres», aviso de que las dos contraseñas coinciden y un mensaje final «Todo listo: ya puede guardar».
+- Se usa tanto en el primer ingreso (pantalla obligatoria, rediseñada: título, aviso y tarjeta de dos columnas) como en el cambio voluntario del dashboard.
+- La contraseña **nunca sale del navegador** por este panel; el servidor vuelve a validarla completa al guardar. El JavaScript repite las reglas de Python y hay una prueba que compara ambos con más de 3 000 contraseñas.
+- Nota técnica: `st.html` descarta el script entero si dentro hay texto con forma de etiqueta HTML; por eso `password_vivo.js` no puede contener `<` seguido de letra, `/` o `!` (hay una guardia y una prueba).
+
+**«Mi progreso» de las redes — tablas navegables** (`utils/tabla_navegable.py`):
+- Encabezado **azul claro**, filas alternadas y etiquetas de color. (Estos estilos de tablas y paneles solo se cargaban en el panel de administración; ahora la pantalla de las redes los trae: `aplicar_css_red()`.)
+- Cada tabla tiene **búsqueda**, **filtro por estado** (pastillas con el conteo), **orden**, **filas por página (10, 25, 50 o Todas; 10 por defecto)** y paginación «Anterior / Siguiente» con «Mostrando 1–10 de 43». Al buscar, filtrar o cambiar de página solo se redibuja la tabla (fragmento), sin volver a consultar la base de datos.
+- «Detalle de la semana»: las dos listas largas de centros se unieron en **una tabla** (pendientes primero), con filtro Todos / Pendiente / Enviado.
+- «Envíos y observaciones»: «Quién envió», «Qué se recibió por centro y tipo» y «Observaciones» con los mismos controles.
+- «Evolución semanal»: ahora **una fila por semana** (más reciente arriba) con barra de cumplimiento, en vez de una sola fila ancha con una columna por semana; «Envíos tardíos» igual.
+- Las descargas CSV/Excel de cada tabla incluyen **todo lo filtrado**, no solo la página visible.
+
+**Cómo actualizar:** copiar el proyecto sobre el anterior y `docker compose up -d --build`. Sin cambios de base de datos. Archivos nuevos: `components/password_vivo.js`, `utils/tabla_navegable.py`.
+
+## v7.4 — Panel más claro y fácil de leer, tablas con filtros y Notificaciones con responsables de red
+
+**Colores del panel:** la barra lateral pasa de azul oscuro a **celeste claro** (fondo `#E6F2FC`, el ítem activo en blanco con una franja celeste, texto azul medio) y los títulos y encabezados de tabla usan un azul menos oscuro (`#0A5A96` / encabezado `#D4E9FA`). Solo cambia `utils/tema.py` y el logotipo de la barra (`app_pages/admin.py`).
+
+**Tablas del panel con filtros** (`utils/tabla_navegable.py`, la misma tabla de las redes, ahora más versátil):
+- Búsqueda de texto, **filtros de lista** (red, usuario, acción, acceso…), **botones por estado** con conteo, **rango de fechas** (desde / hasta), orden, **columnas visibles** (botón «Columnas»), filas por página (10 / 25 / 50 / Todas) y paginación.
+- Etiquetas de **«Aplicados»** con lo que está activo y botón **«Limpiar filtros»**.
+- La descarga (CSV/Excel) incluye todo lo filtrado, con todas las columnas.
+- Aplicado en: **Control de atrasos** (estado, red, centro, fecha de envío; las columnas Observación, Semana activa y Año se muestran desde «Columnas»), **Observaciones** (motivo, red, búsqueda; en las pestañas de comentarios, por revisar, fallas y revisadas), **Cuentas del panel**, **Administradores**, **Credenciales de red** (acceso, contraseña pendiente de cambio, último ingreso) e **Historial y logs** (usuario, acción, fecha).
+
+**Notificaciones con responsables de red** (`app_pages/admin_notificaciones.py`, `src/responsables_red.py`):
+- Paso 2: la lista de casillas se reemplazó por una **tabla de centros pendientes** con búsqueda, filtro por red, «Marcar todos» y «Quitar todos». La selección se conserva al buscar o filtrar.
+- Paso 3: **«Responsables conocidos de la red»**. El sistema propone a las personas que ya enviaron reportes de esa red (nombre, apellido y correo de sus envíos, sin repetir correos aunque cambien las mayúsculas) y a las que usted guardó. Por defecto queda marcada **la persona que envió más recientemente**; puede marcar más.
+- Si marca varias personas, el interruptor «Enviar a cada responsable solo los centros que atiende» reparte los centros según lo que cada una reportó antes (los centros que nadie atiende van a la primera).
+- «Otra persona»: nombre, apellido, correo y teléfono como antes, con la casilla **«Guardar como responsable de la red»**; las personas guardadas se pueden quitar desde «Quitar a un responsable guardado».
+- Resumen del envío en la columna derecha. Cada envío se registra en el historial.
+
+**Cómo actualizar:** copiar el proyecto sobre el anterior y `docker compose up -d --build`.
+**Base de datos (opcional):** ejecutar `sql/15_responsables_red.sql` en el SQL Editor de Supabase para poder **guardar** responsables. Sin eso todo funciona y se siguen proponiendo las personas detectadas en los envíos.
+Archivos nuevos: `src/responsables_red.py`, `sql/15_responsables_red.sql`.
+
+## v7.5 — Fechas y configuración protegidas, ZIP revisado por dentro y sesión que se cierra sola
+
+**1. Cambiar fechas y configuración ya no es para todos** (`src/cambios_configuracion.py`, nuevo). Antes cualquier cuenta ADMIN podía cambiar la semana activa, la fecha de corte, los años epidemiológicos (incluso eliminarlos), los centros excluidos y las carpetas de Drive, y varios de esos cambios no dejaban registro. Ahora todo cambio:
+- exige el permiso nuevo **«Cambiar la configuración»** (lo reparte solo el SUPER_ADMIN principal en *Permisos*; el principal siempre lo tiene). Las demás cuentas **ven** las pantallas, pero sus botones de cambio quedan desactivados;
+- exige un **motivo escrito** (mínimo 8 caracteres);
+- cumple reglas de sentido común: la **fecha de corte debe ser futura y no pasar de 21 días** (`CORTE_MAX_DIAS_FUTURO`); la semana activa **no retrocede ni salta más de 2** sin marcar «Es un cambio excepcional»; un **año con envíos no se puede eliminar**; fechas de año coherentes (350–380 días, 52 o 53 semanas); el ID de una carpeta de Drive debe tener formato válido;
+- deja **constancia en la auditoría antes de hacerse**, con el valor anterior y el nuevo, el motivo y la IP. Si no se puede dejar constancia, **el cambio no se hace**. Si algo falla a medias, se **devuelve a su valor anterior** y queda un registro con resultado ERROR;
+- **avisa por correo** a quien lo hizo y al SUPER_ADMIN principal (con alertas: año con envíos, cambio excepcional, acción que no se puede deshacer, fuera de horario laboral).
+Pantallas que pasan por aquí: *Configuración* (parámetros, años, años permitidos, alertas por correo), *Exclusiones* (excluir, reincorporar, limpiar red; el motivo del cambio es ahora el motivo de la exclusión) y *Drive* (agregar, activar y eliminar carpetas). La validación semanal de corte y semana (*Cierres*) sigue como estaba: ya registraba quién validó y si corrigió.
+
+**2. ZIP revisado por dentro** (`src/zip_seguridad.py`, nuevo). Además de la extensión, se revisa qué hay dentro, sin ejecutar nada. Los archivos con extensión numérica o de código de centro (`.062`, `.B56`…) **se siguen aceptando**; lo que se bloquea es lo que se parece a un programa o a un script:
+- ejecutables de Windows, Linux y macOS, bibliotecas, accesos directos `.lnk`, scripts (shell, PowerShell, PHP, JavaScript, HTML, SVG, `.reg`, `.bat`), PDF y RTF;
+- archivos comprimidos dentro del ZIP (ZIP, RAR, 7z, gzip, tar, cab…);
+- hojas `.xlsx` / `.xls` con macros, objetos incrustados o controles ActiveX; `.xlsx` que no lo son de verdad;
+- fórmulas peligrosas en texto/CSV (`=cmd|…`, `=HYPERLINK(…)`);
+- estructura: ZIP con un programa pegado antes, archivos con contraseña, enlaces simbólicos, rutas que salen de la carpeta, nombres repetidos, caracteres ocultos (U+202E), dobles extensiones (`reporte.exe.062`) y **ZIP bomba** (compresión desproporcionada o tamaño real distinto del declarado).
+La revisión se hace al elegir el archivo y **otra vez en el servidor justo antes de subirlo a Drive**. Cada ZIP bloqueado queda en el *Control de actividad* (categoría «Seguridad», una vez por archivo). Opcional: `ZIP_BLOQUEAR_EXTENSIONES_NO_PERMITIDAS=true` hace que un archivo con extensión inesperada (.txt, .png…) bloquee el envío en vez de solo advertir.
+
+**3. Notificaciones masivas** con tope y constancia: máximo **40 destinatarios por envío** y **60 correos por hora y por cuenta** (`NOTIF_MAX_DESTINATARIOS`, `NOTIF_MAX_CORREOS_HORA`). Cada envío queda en la auditoría (quién, a cuántas personas, cuántos salieron) y el tope alcanzado también.
+
+**4. Sesión del panel**: se cierra sola tras **30 minutos sin actividad** (`SESION_INACTIVIDAD_MIN`); queda registrado como «Sesión cerrada por inactividad».
+
+**Sin cambios:** el formulario de envío **no limita** cuántos envíos puede hacer un correo o una IP (decisión de la OIIS).
+
+**Cómo actualizar:** copiar el proyecto sobre el anterior y `docker compose up -d --build`.
+**Base de datos:** ejecutar `sql/16_permiso_configuracion.sql` en Supabase (se puede repetir sin problema). Sin ese script, el SUPER_ADMIN principal igual puede cambiar la configuración, pero no podrá asignar el permiso a otras cuentas. Las migraciones 09 a 15 ya deben estar aplicadas; **no** ejecute `sql/99_limpieza_previa_a_produccion.sql`.
+**.env (opcional):** `SESION_INACTIVIDAD_MIN`, `CORTE_MAX_DIAS_FUTURO`, `NOTIF_MAX_DESTINATARIOS`, `NOTIF_MAX_CORREOS_HORA`, `ZIP_BLOQUEAR_EXTENSIONES_NO_PERMITIDAS` (ver `.env.example`).
+Archivos nuevos: `src/cambios_configuracion.py`, `src/zip_seguridad.py`, `sql/16_permiso_configuracion.sql`.
+
+## v7.6 — Pedir permisos desde la pantalla, botones bloqueados claros y filtros en Monitoreo
+
+**1. «Solicitar acceso»** (`src/solicitudes_permiso.py`, `app_pages/solicitar_permiso.py`, nuevos). Antes, una cuenta sin permiso veía el campo «Motivo» y los botones bloqueados, pero no tenía dónde pedirlo. Ahora, en *Configuración*, *Exclusiones*, *Drive*, *Descarga y limpieza* y *Respaldos* aparece el cuadro **«Solicitar acceso»**, que **nunca está bloqueado**: la persona elige el permiso que le falta, explica para qué lo necesita (mínimo 15 caracteres) y lo envía.
+- La solicitud queda guardada como **pendiente**, se avisa por correo a oiis.winepi y queda en el *Control de actividad* (acciones «Pidió un permiso», «Aprobó/Rechazó una solicitud de permiso»). Si la auditoría no puede registrarla, no se envía.
+- En *Permisos de operación*, oiis.winepi ve las **solicitudes pendientes**, y las **aprueba** (eligiendo redes y vigencia, con una respuesta opcional) o las **rechaza** (la persona recibe un correo con la respuesta). Al aprobar se usa el mismo proceso de siempre (aviso de «Permiso otorgado», auditoría). Solo el principal puede responder.
+- Una sola solicitud pendiente por persona y permiso; hasta 6 solicitudes por persona cada 24 horas; la persona puede cancelar la suya y ve el historial de las últimas cinco.
+- oiis.winepi ve un **aviso en el panel** y el número de pendientes junto a «Permisos de operación» en el menú.
+- Si aún no se ejecutó `sql/17_solicitudes_permiso.sql`, la solicitud igual sale **por correo** y queda en la auditoría; solo faltan la pantalla de aprobación y el seguimiento del estado.
+
+**2. Botones bloqueados que se entienden.** Los botones que requieren permiso salen en **ámbar, con borde punteado, candado y la leyenda «(requiere permiso)»**; el campo «Motivo» dice «bloqueado: falta el permiso». Arriba de cada pantalla un aviso dice **qué no puede hacer, qué permiso le falta y quién lo asigna**. En *Descarga y limpieza* se muestra qué permisos tiene y cuáles no (con candado en las pestañas «Descargar» y «Retirar»), y los botones «Preparar ZIP» y «Enviar la solicitud de retiro» quedan visibles pero bloqueados. En *Respaldos*, lo mismo con «Respaldar ahora».
+
+**3. Filtros en Monitoreo**, con el mismo estilo de *Control de atrasos* (búsqueda, estado con conteo, listas desplegables, fechas, orden, columnas, filas por página y descarga de lo filtrado):
+- *Dashboard → Tabla de control*: estado, red, centro, tipo de reporte, fecha de envío y búsqueda por responsable. *Resumen de cumplimiento por red*: situación (Completo/Parcial/Bajo) y red.
+- *Seguimiento Semana Activa → Resumen*: situación y red.
+- *Progreso por Red*: la matriz semana a semana ahora trae **Promedio** y **Situación** y se filtra por red y situación; el análisis de cumplimiento también.
+- El filtro **Centro se acota a la red elegida** (también en *Control de atrasos*).
+
+**4. «Detalle por red» rediseñado** (*Seguimiento Semana Activa*). En lugar de un desplegable por red con dos listas, ahora hay: las **redes más atrasadas** con su barra de avance; el total de centros que **enviaron, pendientes y excluidos**; y una **tabla con una fila por centro** que dice si envió, **quién lo envió, de qué tipo (consulta externa, emergencia, hospitalización), cuándo y el estado del envío**. Los pendientes salen primero (para saber a quién llamar o escribir) y se filtra por estado, red, centro, tipo de reporte y fechas. Se descarga lo filtrado.
+
+**Cómo actualizar:** copiar el proyecto sobre el anterior y `docker compose up -d --build`.
+**Base de datos:** ejecutar `sql/17_solicitudes_permiso.sql` en Supabase (crea una tabla nueva; se puede repetir sin problema). Deben estar aplicadas las migraciones 09 a 16; **no** ejecute `sql/99_limpieza_previa_a_produccion.sql`.
+Archivos nuevos: `src/solicitudes_permiso.py`, `app_pages/solicitar_permiso.py`, `sql/17_solicitudes_permiso.sql`.
+
+## v7.7 — Progreso por Red más ligero y Excel con formato corporativo
+
+**1. Progreso por Red**: las semanas por defecto ahora son **10: desde 10 semanas antes hasta la semana de corte** (la activa), en lugar de las 52 o 53 del año, que demoraban mucho. Sigue pudiendo elegir cualquier rango; si elige más de 20 semanas aparece un aviso de que puede demorar. Vale para «Cumplimiento semana a semana» y para el «Análisis de cumplimiento por red».
+
+**2. Todos los Excel con formato corporativo** (`src/excel_corporativo.py`, nuevo). Cada botón «Descargar Excel» del panel (Tabla de control, Resumen de cumplimiento, Seguimiento, Control de atrasos, Observaciones, Progreso por red, historiales, etc.) ahora genera un archivo con: cinta de EsSalud · OIIS, título, subtítulo con la semana/año, cantidad de registros y fecha de generación; encabezado azul; filas alternadas y bordes finos; **números, fechas y porcentajes reales** (se pueden ordenar y sumar); porcentajes y estados con color (verde / ámbar / rojo / gris); filtros automáticos; encabezado y primera columna inmovilizados; anchos de columna ajustados; y página A4 horizontal, ajustada al ancho, con encabezado repetido y «Página X de Y». Los textos nunca se interpretan como fórmulas (se bloquea la inyección de fórmulas en Excel). Lo que se descarga es lo que está filtrado en pantalla.
+Los Excel que ya tenían diseño propio (Control de actividad, Registro de retiro, Resumen de cumplimiento por red del cierre semanal) conservan su formato y ganan el mismo pie con número de página y papel A4. Los CSV no cambian.
+
+**Cómo actualizar:** copiar el proyecto sobre el anterior y `docker compose up -d --build`. No hay cambios de base de datos.
+Archivo nuevo: `src/excel_corporativo.py`.
+
+## v7.8 — Nueva portada (inicio)
+- Banda azul corporativa a todo el ancho que une el encabezado y la cabecera, con el búho de la OIIS como marca de agua y reflejo tipo cristal.
+- Botones del encabezado en cápsulas de cristal ("Inicio" blanco, "Administración" azul marino); el logo de EsSalud sale en blanco sobre el azul.
+- Número de la semana grande y mosaico de indicadores: Avance nacional, Redes al 100 %, Para el corte, En proceso, Sin envíos aún.
+- Las tres tarjetas de acceso suben sobre la banda, con una franja de color arriba.
+- Solo cambia `app.py` (portada). No hace falta SQL. Las demás pantallas no cambian.
+
+## v7.9 — Nuevo diseño de Enviar reporte, Mi progreso y Confirmación
+- Las tres pantallas usan la banda azul corporativa de la portada (encabezado en cristal, búho de la OIIS de marca de agua) con el título grande y una ficha de cristal.
+  - Enviar reporte: estado de la recepción y ficha de la semana en curso (semana, periodo, fecha límite y días que faltan).
+  - Mi progreso: nombre de la red, anillo de avance de la semana (enviaron / pendientes) y botones «Enviar reporte» y «Cerrar sesión».
+  - Confirmación (acuse): el color de la banda cambia según el resultado (azul, rojo tardío, ámbar con observaciones, naranja duplicado) y el código de seguimiento va en una ficha de cristal.
+- Tarjetas de los pasos, paneles, fichas de cifras y tablas con esquinas más redondeadas, sombra suave y acento de color; encabezado de las tablas en azul marino.
+- No se quitó ningún campo ni dato: observación, usuarios frecuentes, lectura del ZIP, avisos de plazo, tablas con búsqueda/filtro/orden/descarga, envíos y observaciones, evolución y tardíos siguen igual.
+- Solo cambian `utils/tema.py`, `app_pages/usuario.py` y `app_pages/red_login.py`. No hace falta SQL.
+
+## v8.0 — Pantallas "Enviar reporte" y "Mi progreso" con el estilo de los mockups
+
+Solo cambia el diseño. **No se quitó ni se redujo ningún campo, mensaje ni dato.**
+
+- **Enviar reporte**: secciones 1–5 en tarjetas con número y etiqueta de estado ("Completo" / "Falta un dato" / "Opcional"); campos y listas con bordes redondeados; tipos de reporte como tarjetas seleccionables con icono; zona de arrastre del ZIP punteada; botón de envío degradado (gris si está bloqueado).
+- **Panel lateral**: nuevo "Resumen del envío" (anillo y lista de verificación), se restituye "Semana en curso", y se mantienen "Avance de la red" y "Antes de enviar".
+- **Mi progreso**: banda azul con anillo de avance y botones "Enviar reporte" / "Cerrar sesión"; tarjetas KPI con icono; gráfico de evolución con colores por nivel, línea "Meta 90 %", leyenda y resumen (promedio, mejor y peor semana).
+- **Confirmación**: banda azul (verde/rojo/ámbar según el caso) con todos los datos del acuse.
+- Archivos: `utils/tema.py`, `app_pages/usuario.py`, `app_pages/red_login.py`, `app_pages/red_progreso.py`. Sin cambios de SQL ni de variables de entorno.
+
+## v8.1 — Nombres primero, «Cambiar contraseña» visible y aviso de duplicados rediseñado
+
+Solo diseño y orden de campos. **No se quitó ninguna función.**
+
+- **Formulario de envío**: «Nombres» va antes que «Apellidos». Lo mismo en los usuarios frecuentes, el resumen del envío y el acuse («Nombres y apellidos»). Los datos guardados no cambian.
+- **Mi progreso**: botón «Cambiar contraseña» en la banda (lleva al bloque) y bloque propio con borde azul e icono de llave debajo de las 3 tarjetas, ya no queda tapado por la banda. Mismos campos y mensajes.
+- **Aviso «Posible envío duplicado»** (ventana ancha): avisos de color (ya recibido / nuevo), tabla de envíos previos (código, quién lo envió, fecha, estado) y las 3 opciones como tarjetas: **Separar / Enviar como duplicado**, **Reemplazar lo ya enviado** (anteriores a la carpeta REEMPLAZADOS) y **Cancelar**. Misma lógica y mismos textos.
+- Archivos: `app_pages/usuario.py`, `app_pages/red_login.py`, `app_pages/red_progreso.py`, `utils/tema.py`, `utils/frecuentes.py`. Sin cambios de SQL ni de variables de entorno.

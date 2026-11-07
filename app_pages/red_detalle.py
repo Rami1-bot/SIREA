@@ -7,6 +7,9 @@ tipos de reporte (c/e/h) ya se recibieron, y las observaciones que la red dejó 
 Es solo lectura: no hay acciones ni avisos para nadie.
 """
 
+import re
+from datetime import datetime
+
 import pandas as pd
 import streamlit as st
 
@@ -14,7 +17,8 @@ from src.db_manager import get_db_manager
 from src.observaciones import get_observaciones
 from utils.duplicados import es_duplicado, es_reemplazado
 from utils.tema import chip, mostrar, aviso, kpi
-from utils.tema_admin import tabla_df, panel_cab, descargas, esc
+from utils.tema_admin import panel_cab, esc
+from utils.tabla_navegable import tabla_navegable
 from app_pages.usuario_logica import (
     _lista_centros_red, _pares_de_envio, _clave_centro, obtener_centros_excluidos, extraer_nombre_limpio,
 )
@@ -22,6 +26,17 @@ from app_pages.usuario_logica import (
 _TIPOS = (("c", "Consulta externa"), ("e", "Emergencia"), ("h", "Hospitalización"))
 _MOTIVO = {"SUSTENTO": ("Comentario", "ok"), "OBSERVADO": ("Observado", "warn"),
            "DUPLICADO": ("Duplicado", "dup"), "REEMPLAZO": ("Reemplazo", "info")}
+
+
+_TONO_ESTADO = {"A tiempo": "ok", "Tardío": "warn", "Con observaciones": "warn", "Duplicado": "dup", "Reemplazado": "mute"}
+
+
+def _clave_fecha(fila) -> datetime:
+    """Orden por fecha de la primera columna ('dd/mm/aaaa hh:mm'); lo que no se pueda leer va al final."""
+    try:
+        return datetime.strptime(str(fila[0]), "%d/%m/%Y %H:%M")
+    except Exception:
+        return datetime.min
 
 
 def _fecha_lima(valor) -> str:
@@ -99,18 +114,23 @@ def mostrar_detalle_envios_red(red: str, anio: int, semana_activa: int):
     # ---- Quién envió ----
     with st.container(key="red_panel_quien"):
         panel_cab("Quién envió", "Cada envío con su estado; el más reciente primero")
-        vista = pd.DataFrame({
-            "Fecha y hora": [_fecha_lima(e.get("fecha_envio")) for e in envios],
-            "Enviado por": [f"{e.get('apellido_usuario') or ''} {e.get('nombre_usuario') or ''}".strip() for e in envios],
-            "Centros": [_centros_txt(e) for e in envios],
-            "Tipos": [_tipos_txt(e) for e in envios],
-            "Archivos": [e.get("cantidad_archivos") or 0 for e in envios],
-            "Código": [str(e.get("codigo_seguimiento") or "") for e in envios],
-            "Estado": [chip(esc(_estado(e)[0]), _estado(e)[1]) for e in envios],
-        })
-        mostrar(tabla_df(vista, crudas=("Estado",), derecha=("Archivos",)))
-        descargas(vista.assign(Estado=[_estado(e)[0] for e in envios]), f"envios_{red}_{anio}_sem{semana}".replace(" ", "_"),
-                  "Envíos", key="red_det_dl")
+        columnas = ["Fecha y hora", "Enviado por", "Centros", "Tipos", "Archivos", "Código", "Estado"]
+        filas = [[
+            _fecha_lima(e.get("fecha_envio")),
+            f"{e.get('apellido_usuario') or ''} {e.get('nombre_usuario') or ''}".strip(),
+            _centros_txt(e), _tipos_txt(e), e.get("cantidad_archivos") or 0,
+            str(e.get("codigo_seguimiento") or ""), _estado(e)[0],
+        ] for e in envios]
+        tabla_navegable(
+            "red_quien", columnas, filas,
+            chips={"Estado": lambda v: chip(esc(v), _TONO_ESTADO.get(v, "info"))},
+            derecha=("Archivos",), unidad="envíos", placeholder="Buscar por persona, centro o código",
+            filtro={"columna": "Estado", "opciones": list(_TONO_ESTADO), "etiqueta": "Estado del envío"},
+            orden_opciones=[("Más reciente primero", "Fecha y hora", True), ("Más antiguo primero", "Fecha y hora", False),
+                            ("Enviado por: A → Z", "Enviado por", False), ("Centros: A → Z", "Centros", False)],
+            orden_inicial="Más reciente primero", claves_orden={"Fecha y hora": _clave_fecha},
+            descarga=(f"envios_{red}_{anio}_sem{semana}".replace(" ", "_"), "Envíos"),
+        )
 
     # ---- Centros × tipo ----
     try:
@@ -130,11 +150,15 @@ def mostrar_detalle_envios_red(red: str, anio: int, semana_activa: int):
             for letra, _ in _TIPOS:
                 fila.append(chip("Recibido", "ok") if (clave, letra) in recibido else '<span class="sire-nota">—</span>')
             filas.append(fila)
-        from utils.tema_admin import tabla_html
         with st.container(key="red_panel_matriz"):
             panel_cab("Qué se recibió por centro y tipo de reporte",
                       "Un guion no siempre es una falta: no todos los centros reportan los tres tipos")
-            mostrar(tabla_html(["Centro"] + [n for _, n in _TIPOS], filas, crudas=[n for _, n in _TIPOS]))
+            tabla_navegable(
+                "red_matriz", ["Centro"] + [n for _, n in _TIPOS], filas, crudas=[n for _, n in _TIPOS],
+                unidad="centros", placeholder="Buscar un centro",
+                orden_opciones=[("Centro: A → Z", "Centro", False), ("Centro: Z → A", "Centro", True)],
+                orden_inicial="Centro: A → Z",
+            )
 
     # ---- Observaciones ----
     with st.container(key="red_panel_obs"):
@@ -142,14 +166,18 @@ def mostrar_detalle_envios_red(red: str, anio: int, semana_activa: int):
         if not obs:
             mostrar('<div class="sire-vacio">No hay observaciones en esta semana.</div>')
         else:
-            vo = pd.DataFrame({
-                "Fecha y hora": [_fecha_lima(o.get("fecha_creacion")) for o in obs],
-                "Enviado por": [str(o.get("remitente") or "") for o in obs],
-                "Código": [str(o.get("codigo_seguimiento") or "") for o in obs],
-                "Tipo": [chip(esc(_MOTIVO.get(o.get("motivo"), (o.get("motivo") or "", "info"))[0]),
-                              _MOTIVO.get(o.get("motivo"), ("", "info"))[1]) for o in obs],
-                "Observación": [str(o.get("texto") or o.get("detalle") or "") for o in obs],
-                "Revisión": [chip("Revisada por la OIIS", "ok") if o.get("revisada") else chip("Pendiente de revisión", "warn")
-                             for o in obs],
-            })
-            mostrar(tabla_df(vo, crudas=("Tipo", "Revisión")))
+            columnas_o = ["Fecha y hora", "Enviado por", "Código", "Tipo", "Observación", "Revisión"]
+            filas_o = [[
+                _fecha_lima(o.get("fecha_creacion")), str(o.get("remitente") or ""), str(o.get("codigo_seguimiento") or ""),
+                chip(esc(_MOTIVO.get(o.get("motivo"), (o.get("motivo") or "", "info"))[0]),
+                     _MOTIVO.get(o.get("motivo"), ("", "info"))[1]),
+                str(o.get("texto") or o.get("detalle") or ""),
+                chip("Revisada por la OIIS", "ok") if o.get("revisada") else chip("Pendiente de revisión", "warn"),
+            ] for o in obs]
+            tabla_navegable(
+                "red_obs", columnas_o, filas_o, crudas=("Tipo", "Revisión"), unidad="observaciones",
+                placeholder="Buscar en las observaciones",
+                filtro={"columna": "Revisión", "opciones": ["Pendiente de revisión", "Revisada por la OIIS"], "etiqueta": "Revisión"},
+                orden_opciones=[("Más reciente primero", "Fecha y hora", True), ("Más antigua primero", "Fecha y hora", False)],
+                orden_inicial="Más reciente primero", claves_orden={"Fecha y hora": _clave_fecha},
+            )

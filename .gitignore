@@ -35,6 +35,10 @@ certs/*
 !certs/.gitkeep
 
 # Copias/respaldos del .env y archivos de apoyo (tienen secretos): nunca al repositorio
+.env.*
+!.env.example
+*.respaldo
+*.bak
 *.old
 caddy-root.crt
 

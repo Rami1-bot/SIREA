@@ -2,12 +2,13 @@
 Convierte su .env (y credentials/service_account.json) en el texto que se
 pega en Streamlit Community Cloud → App settings → Secrets.
 
-Uso, desde la carpeta del proyecto y con el entorno virtual activado:
+Uso, desde la carpeta del proyecto:
 
-    python scripts/env_a_secrets.py > secretos_para_streamlit.txt
+    python scripts/env_a_secrets.py --archivo        # crea .streamlit/secrets.toml (SIREA 3.5)
+    python scripts/env_a_secrets.py > secretos_para_streamlit.txt   # texto para pegar en Streamlit Cloud
 
-Abra secretos_para_streamlit.txt, copie TODO y péguelo en el cuadro
-«Secrets» de Streamlit Cloud. Después BORRE ese archivo: contiene sus claves.
+Con --archivo, SIREA deja de necesitar el .env (puede borrarlo después de comprobar que
+todo funciona). Si pega el texto en Streamlit Cloud, BORRE luego secretos_para_streamlit.txt.
 
 No envía nada a ningún lado: solo lee dos archivos locales e imprime.
 """
@@ -35,7 +36,7 @@ def main() -> int:
     valores = {k: (v or "").strip().strip('"').strip("'") for k, v in dotenv_values(env_path).items()}
     valores.update(FIJAR)
 
-    lineas = ["# Secretos de SIREA para Streamlit Community Cloud (generado por scripts/env_a_secrets.py)",
+    lineas = ["# Secretos de SIREA (generado por scripts/env_a_secrets.py desde el .env)",
               "# NO subir este texto a GitHub.", ""]
     for k in sorted(valores):
         if k in OMITIR or not k or k.startswith("#") or valores[k] == "":
@@ -52,7 +53,17 @@ def main() -> int:
     else:
         print("Aviso: no se encontró credentials/service_account.json; Drive no funcionará en la nube.", file=sys.stderr)
 
-    print("\n".join(lineas))
+    texto = "\n".join(lineas) + "\n"
+    if "--archivo" in sys.argv:
+        destino = RAIZ / ".streamlit" / "secrets.toml"
+        if destino.exists() and "--reemplazar" not in sys.argv:
+            print(f"Ya existe {destino}. Use --archivo --reemplazar para sobrescribirlo.", file=sys.stderr)
+            return 1
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        destino.write_text(texto, encoding="utf-8")
+        print(f"Listo: {destino} ({len(lineas)} líneas). Compruebe con: python verificar_despliegue.py", file=sys.stderr)
+        return 0
+    print(texto, end="")
     return 0
 
 

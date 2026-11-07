@@ -1,3 +1,78 @@
+# SIREA 3.5 · Identidad propia, secretos en secrets.toml, Salud del sistema y seguridad por filas
+
+**Fecha:** 06/11/2026 · sobre SIREA 3.4. Requiere SQL: `55_rls_tablas_base.sql` y `56_latido_robot.sql` (o el combinado
+`sql/ACTUALIZAR_TODO_SIREA_3_5.sql`). No hay paquetes nuevos.
+
+| | Qué | Dónde |
+|---|---|---|
+| 🎨 | **Diseño propio, distinto de SIRE**: el año como un **quipu** (cuerda de 52 semanas con la activa marcada) en la portada y en el encabezado del panel; paleta **azul EsSalud original** `#0077C8` con más color: celeste `#41B6E6`, verde salud `#1E9E63`, estilo **corporativo**: tarjetas blancas con el color en los bordes, sin rellenos verdes, celestes ni lilas, sin amarillo mostaza, sin marca de agua; accesos de red y del panel sobre la misma banda azul; **figuras de salud** de fondo (cruz, corazón, estetoscopio, termómetro, microbio, vacuna…); portada nueva con fichas blancas y barra de avance; **todo de extremo a extremo** (menú, cabeceras, botones, tarjetas y cuerda del panel, sin huecos); barra lateral clara; contraste AA revisado en cada pantalla; Bricolage Grotesque + IBM Plex Sans dentro del proyecto (sin Google Fonts); etiquetas sin MAYÚSCULAS, bordes finos, foco visible y «reducir movimiento». Nueva marca: un quipu pequeño | `utils/tema.py`, `app.py`, `.streamlit/config.toml`, `static/fonts/`, `docs/DISENO_SIREA.md` |
+| 🛠️ | **Sin conexión con la base de datos, un aviso amable**: si Supabase no responde (proyecto pausado, sin internet, VPN/proxy) las redes ven una sola franja corta («El sistema no está disponible en este momento…»), el paso 1 marca «Sin conexión» y el botón «Enviar reporte» se desactiva hasta que vuelva; lo ya escrito se conserva. La pantalla se revisa sola cada 30 s y se recarga cuando vuelve la conexión. El detalle técnico (servidor, causa y qué hacer) lo ven solo los administradores. Ya no aparece «AÑO NO PERMITIDO: 2026. Años permitidos: » vacío, y el registro resume esos errores en una línea por minuto | `src/conexion_supabase.py`, `app.py`, `app_pages/usuario.py`, `app_pages/usuario_logica.py`, `src/db_manager.py`, `verificar_despliegue.py` |
+| ➕ | **Robot de actividad** para que Supabase (plan gratuito) no se pause por inactividad: consulta mínima con la clave pública a la función `sirea_latido()` (no toca tablas). Se instala en Windows con doble clic (`scripts/instalar_robot_windows.bat`, todos los días 08:30) o en GitHub Actions (cada 2 días, sin depender de una PC). Guía: `docs/MANTENER_ACTIVO.md` | `scripts/mantener_activo.py`, `scripts/instalar_robot_windows.bat`, `.github/workflows/mantener_supabase_activo.yml`, `sql/56_latido_robot.sql` |
+| ➕ | **Secretos en `.streamlit/secrets.toml`** (plantilla completa con todas las variables y la cuenta de Google). Lo leen la web, el proceso programado y Docker; el `.env` queda como respaldo. `scripts/env_a_secrets.py --archivo` convierte un `.env` | `src/secretos.py`, `.streamlit/secrets.toml.example`, `docs/SECRETOS.md` |
+| ➕ | **Salud del sistema** (SUPER_ADMIN): configuración, entorno, credencial de Google, Supabase, tablas, RLS, Drive, correo e IA revisados desde el panel, con «solo avisos y fallas» y descarga en Excel | `app_pages/admin_salud.py`, `verificar_despliegue.py` |
+| 🔒 | **Seguridad por filas (RLS) en todas las tablas** y sin acceso para la clave pública; Salud del sistema avisa si `SUPABASE_KEY` es la pública o si queda alguna tabla sin RLS | `sql/55_rls_tablas_base.sql` |
+| 🔁 | **El agente usa los responsables guardados** en Notificaciones: van en copia y, si nadie envió en 8 semanas, son el destinatario | `src/agentes/acciones.py` |
+| ➕ | **Quipu e investigador saben de lo nuevo**: ZIP bloqueados, cambios de configuración, solicitudes de permiso, redes sin responsable y estado del sistema (5 herramientas de solo lectura, sin datos personales). **Pendientes** suma 4 secciones | `src/agentes/herramientas.py`, `pendientes.py`, `quipu.py` |
+| ⚡ | **Portada rápida**: avance nacional con 3 consultas en total (antes, 2 por red) y precalculado cada 5 minutos por el proceso programado | `src/avance_nacional.py`, `src/programador.py` |
+| ✔ | **Prueba de paridad**: los requisitos de contraseña del navegador y del servidor coinciden en más de 3000 contraseñas (si alguien cambia una regla en un solo lado, falla) | `tests/test_password_js_paridad.py` |
+| 🔧 | Las sugerencias de Quipu por pantalla no coincidían con los títulos reales («Seguimiento semanal», «Control de atrasos») | `app_pages/quipu.py` |
+
+**Puesta en marcha:** crear `.streamlit/secrets.toml` (o `python scripts/env_a_secrets.py --archivo`); confirmar que
+`SUPABASE_KEY` es la clave de servidor; ejecutar `sql/ACTUALIZAR_TODO_SIREA_3_5.sql`; entrar como SUPER_ADMIN →
+**Salud del sistema** → «Revisar ahora». Con Docker: `docker compose up -d --build` (monta `.streamlit/`).
+
+**Verificación:** 219 pruebas automáticas en verde (18 nuevas); recorrido en navegador de 61 pantallas y flujos sin
+problemas (incluye Salud del sistema con su revisión); el SQL combinado y el 55 corrieron dos veces seguidas en
+PostgreSQL 16 (la clave pública queda sin acceso y la de servidor sigue viendo todo).
+
+---
+
+# SIREA 3.4 · Todo SIRE v8.1 dentro de SIREA
+
+**Fecha:** 06/11/2026 · sobre SIREA 3.3 + SIRE v7.3 → v8.1 (fusión completa). Requiere SQL: `15`, `16` y `17`
+(o el combinado `sql/ACTUALIZAR_TODO_SIREA_3_4.sql`). No hay paquetes nuevos.
+
+SIREA 3.0 nació de SIRE v7.2. Desde entonces SIRE avanzó nueve versiones; esta entrega trae **todas** sus funciones
+y conserva todo lo de SIREA (agente, Gobernanza de IA, Quipu, filtro común, F5 sin perder la sesión, informe en PDF,
+bloqueos de login persistentes, colores oficiales y lila de la IA). El historial completo de SIRE quedó en
+`CAMBIOS_SIRE_historico.md`.
+
+| | Qué (versión de SIRE) | Dónde |
+|---|---|---|
+| ➕ | **ZIP revisado por dentro** (v7.5): bloquea programas, scripts, macros, ZIP dentro del ZIP, fórmulas peligrosas, rutas tramposas, dobles extensiones y ZIP bomba; se repite en el servidor antes de subir a Drive | `src/zip_seguridad.py`, `zip_processor.py`, `usuario_logica.py` |
+| ➕ | **Configuración protegida** (v7.5): permiso nuevo «Cambiar la configuración», motivo obligatorio, reglas de sentido común (corte ≤ 21 días, semana sin saltos), constancia previa en la auditoría y aviso por correo | `src/cambios_configuracion.py`, Configuración, Exclusiones, Drive |
+| ➕ | **Solicitar acceso** (v7.6): quien no tiene un permiso lo pide desde la pantalla; oiis.winepi lo aprueba o rechaza en Permisos de operación; botones bloqueados en ámbar con candado | `src/solicitudes_permiso.py`, `app_pages/solicitar_permiso.py` |
+| ➕ | **Tablas navegables** (v7.3–v7.6): búsqueda, filtros, fechas, columnas, paginación y descarga de lo filtrado en Panel de control, Seguimiento, Atrasos, Progreso, Observaciones, Cuentas, Administradores, Credenciales, Historial y en «Mi progreso» de las redes | `utils/tabla_navegable.py` |
+| ➕ | **Seguimiento · Detalle por red** (v7.6): una fila por centro con quién envió, tipo, fecha y estado; pendientes primero | `admin_seguimiento.py` |
+| 🔁 | **Notificaciones con responsables conocidos** (v7.4) en lugar del selector de SIREA 3.3: varias personas, reparto de centros por responsable, guardar responsables, tabla de centros con «Marcar/Quitar todos», topes de 40 destinatarios y 60 correos/hora. Se conservan las sugerencias del agente, el aviso de recordatorio reciente y el filtro común; **nuevo interruptor** «Un solo correo con los demás en copia» (lo que hacía 3.3) | `admin_notificaciones.py`, `src/responsables_red.py` |
+| ➕ | **Contraseña amable para las redes** (v7.3): 8 caracteres con letras y un número (o una frase de 12), requisitos que se marcan **mientras se escribe** y botón «Sugerir una contraseña fácil de recordar». El panel sigue con la política estricta | `password_policy.py`, `utils/cuentas_ui.py`, `components/password_vivo.js` |
+| ➕ | **Excel corporativo** (v7.7) en todas las descargas del panel; A4 y «Página X de Y» en los Excel propios | `src/excel_corporativo.py` |
+| 🔁 | **Nuevo diseño** (v7.4, v7.8–v8.1): barra lateral celeste clara, portada con banda azul y semana grande, Enviar reporte en tarjetas con «Resumen del envío», Mi progreso con anillo de avance y «Cambiar contraseña» visible, aviso de duplicado rediseñado, Nombres antes que Apellidos. La «A» lila de SIREA se mantiene (clara sobre el azul) | `utils/tema.py`, `app.py`, `usuario.py`, `red_login.py`, `red_progreso.py` |
+| ➕ | Progreso por red arranca en las **últimas 10 semanas** (v7.7); sesión cerrada por inactividad queda en el historial (v7.5) | `admin_progreso.py`, `auth.py` |
+| 🔧 | Los respaldos incluyen `observaciones_envio`, `responsables_red` y `solicitudes_permiso`; `verificar_despliegue.py` revisa las tablas 15 y 17 | `respaldos.py`, `verificar_despliegue.py` |
+
+**Decisiones de la fusión**
+
+- Donde SIRE y SIREA resolvían lo mismo, se dejó lo más completo y se conservó lo que el otro aportaba:
+  filtro común de SIREA + tablas navegables de SIRE; responsables de SIRE + copia y log compatible con el agente de SIREA.
+- El registro de recordatorios manuales mantiene el **formato único de SIREA** (`Red: …`): el agente lo lee para no
+  repetir recordatorios a una red.
+- Sesión: se usa `SESION_INACTIVIDAD_MINUTOS` de SIREA y se acepta también `SESION_INACTIVIDAD_MIN` de SIRE.
+- Se conservan los arreglos propios de SIREA sobre el código de SIRE (estadísticas por año, fechas ISO en Historial,
+  latido configurable del programador, aviso de Streamlit Cloud).
+
+**Puesta en marcha:** ejecutar `sql/ACTUALIZAR_TODO_SIREA_3_4.sql` (o `15`, `16`, `17`); variables opcionales nuevas en
+`.env.example` (`CORTE_MAX_DIAS_FUTURO`, `NOTIF_MAX_DESTINATARIOS`, `NOTIF_MAX_CORREOS_HORA`,
+`ZIP_BLOQUEAR_EXTENSIONES_NO_PERMITIDAS`, `ZIP_MAX_RATIO`); entrar como oiis.winepi → Permisos de operación y asignar
+«Cambiar la configuración» a quien corresponda (los ADMIN ya no pueden cambiar fechas sin él).
+
+**Verificación:** 201 pruebas automáticas en verde (14 nuevas: seguridad del ZIP, perfil de contraseña de las redes,
+JavaScript sin etiquetas, configuración con permiso y motivo, Excel sin fórmulas, variables de sesión); recorrido en
+navegador de 59 pantallas y flujos sin problemas, más el portal de una red y las cinco pantallas protegidas vistas por
+un ADMIN sin permisos; el SQL combinado corrió dos veces seguidas en PostgreSQL 16 sin errores.
+
+---
+
 # SIREA 3.3 · Quipu, Gobernanza de IA aparte, informe en PDF, filtros comunes y refresco sin perder la sesión
 
 **Fecha:** 24/10/2026 · sobre SIREA 3.2. No requiere SQL nuevo.

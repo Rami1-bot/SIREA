@@ -10,12 +10,19 @@ from src.db_manager import get_db_manager
 from src.data_loader import get_data_loader
 from utils.helpers import sanitizar_html
 from utils.tema import mostrar, aviso, kpi
-from utils.tema_admin import tabla_df, panel_cab
+from utils.tema_admin import tabla_df, panel_cab, esc
 from app_pages.admin_helpers import (
     formatear_centro,
     formatear_fecha_columna,
     requerir_admin,
+    estado_configuracion,
+    campo_motivo,
+    limpiar_motivo,
+    boton_cfg,
+    aviso_solo_consulta,
 )
+from src.cambios_configuracion import get_cambios_configuracion
+from app_pages.solicitar_permiso import cuadro_solicitud
 
 
 def mostrar_gestion_exclusiones():
@@ -24,6 +31,10 @@ def mostrar_gestion_exclusiones():
     Usa los metodos persistentes de DatabaseManager.
     """
     requerir_admin()
+    # v7.5: excluir o reincorporar centros cambia los totales y los atrasos; exige permiso y motivo.
+    actor, puede = estado_configuracion()
+    cambios_cfg = get_cambios_configuracion()
+    boton = boton_cfg(puede)
 
     db_manager = get_db_manager()
     data_loader = get_data_loader()
@@ -56,12 +67,22 @@ def mostrar_gestion_exclusiones():
         mostrar(kpi("Redes con exclusiones", len(exclusiones_existentes), "Con al menos un centro", None, "dash"))
 
     # ============================================================
+    # MOTIVO DEL CAMBIO (v7.5)
+    # ============================================================
+    with st.container(key="panel_excl_motivo"):
+        panel_cab("Motivo del cambio", "Se pide para excluir, reincorporar o limpiar; queda en la auditoría y se avisa por correo")
+        if not puede:
+            aviso_solo_consulta("No puede excluir ni reincorporar centros")
+        motivo = campo_motivo("excl_motivo", puede)
+    cuadro_solicitud(["CONFIGURACION"], "sol_excl")
+
+    # ============================================================
     # AGREGAR EXCLUSION
     # ============================================================
     with st.container(key="panel_excl_agregar"):
         panel_cab("Excluir un centro", "El centro deja de contarse en los totales de su red")
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
 
         with col1:
             red_seleccionada = st.selectbox("Red", options=redes, key="red_exclusion")
@@ -83,28 +104,15 @@ def mostrar_gestion_exclusiones():
                     placeholder="Seleccione un centro", key="centro_exclusion"
                 )
 
-        with col3:
-            motivo_exclusion = st.text_input(
-                "Motivo (opcional)", placeholder="Ej.: Centro cerrado temporalmente", key="motivo_exclusion"
-            )
-
-        if st.button("Excluir centro", type="primary", icon=":material/block:",
+        if boton("Excluir centro", type="primary", icon=":material/block:",
                      key="btn_excluir", disabled=not (red_seleccionada and centro_a_excluir)):
-            usuario = st.session_state.admin_usuario
-            usuario_nombre = usuario.get('nombre', usuario.get('usuario', 'admin')) if isinstance(usuario, dict) else str(usuario)
-
-            if db_manager.agregar_centro_excluido(
-                red_nombre=red_seleccionada,
-                centro_nombre=centro_a_excluir,
-                motivo=motivo_exclusion if motivo_exclusion else None,
-                creado_por=usuario_nombre
-            ):
-                st.toast(f"Centro «{centro_a_excluir}» excluido de la red {red_seleccionada}.",
-                         icon=":material/check_circle:")
+            ok, msg = cambios_cfg.excluir_centro(actor, red_seleccionada, centro_a_excluir, motivo)
+            if ok:
+                limpiar_motivo("excl_motivo")
+                st.toast(msg, icon=":material/check_circle:")
                 st.rerun()
             else:
-                mostrar(aviso("bad", "No se pudo excluir el centro",
-                              f"Verifique que la red {sanitizar_html(red_seleccionada)} exista."))
+                mostrar(aviso("bad", "No se pudo excluir el centro", esc(msg)))
 
     # ============================================================
     # EXCLUSIONES ACTUALES
@@ -148,18 +156,19 @@ def mostrar_gestion_exclusiones():
                 key="centro_reincorporar"
             )
         with col3:
-            reincorporar = st.button(
+            reincorporar = boton(
                 "Reincorporar", use_container_width=True, icon=":material/undo:", key="btn_reincorporar",
-                disabled=not (red_reincorporar and centro_reincorporar and centro_reincorporar != "No hay centros excluidos"),
+                disabled=not (red_reincorporar and centro_reincorporar
+                              and centro_reincorporar != "No hay centros excluidos"),
             )
         if reincorporar:
-            if db_manager.eliminar_centro_excluido(red_reincorporar, centro_reincorporar):
-                st.toast(f"Centro «{centro_reincorporar}» reincorporado a la red {red_reincorporar}.",
-                         icon=":material/check_circle:")
+            ok, msg = cambios_cfg.reincorporar_centro(actor, red_reincorporar, centro_reincorporar, motivo)
+            if ok:
+                limpiar_motivo("excl_motivo")
+                st.toast(msg, icon=":material/check_circle:")
                 st.rerun()
             else:
-                mostrar(aviso("bad", "No se pudo reincorporar el centro",
-                              f"Verifique que la red {sanitizar_html(red_reincorporar)} exista."))
+                mostrar(aviso("bad", "No se pudo reincorporar el centro", esc(msg)))
 
     with st.container(key="peligro_exclusiones"):
         mostrar(aviso("bad", "Limpiar todas las exclusiones de una red",
@@ -173,12 +182,15 @@ def mostrar_gestion_exclusiones():
                 f"Confirmo reincorporar {cantidad} centro(s) de {red_limpiar}",
                 key="excl_confirma_limpiar")
         with col3:
-            if st.button("Limpiar exclusiones", type="primary", use_container_width=True,
+            if boton("Limpiar exclusiones", type="primary", use_container_width=True,
                          icon=":material/delete:", key="btn_limpiar_excl"):
                 if not confirmar_limpiar:
                     st.warning("Marque la casilla de confirmación para continuar.")
-                elif db_manager.limpiar_centros_excluidos(red_limpiar):
-                    st.toast(f"Se limpiaron las exclusiones de la red {red_limpiar}.", icon=":material/check_circle:")
-                    st.rerun()
                 else:
-                    mostrar(aviso("bad", "No se pudieron limpiar las exclusiones"))
+                    ok, msg = cambios_cfg.limpiar_exclusiones(actor, red_limpiar, motivo)
+                    if ok:
+                        limpiar_motivo("excl_motivo")
+                        st.toast(msg, icon=":material/check_circle:")
+                        st.rerun()
+                    else:
+                        mostrar(aviso("bad", "No se pudieron limpiar las exclusiones", esc(msg)))

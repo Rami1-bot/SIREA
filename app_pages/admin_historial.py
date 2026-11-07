@@ -9,7 +9,18 @@ import streamlit as st
 from src.auth import get_auth_manager
 from src.db_manager import get_db_manager
 from utils.tema import mostrar, aviso
-from utils.tema_admin import tabla_df, panel_cab, descargas
+from datetime import datetime
+
+from utils.tema_admin import panel_cab
+from utils.tabla_navegable import tabla_navegable_df
+
+
+def _clave_fecha(fila):
+    """Orden de la columna Fecha (texto dd/mm/aaaa hh:mm:ss)."""
+    try:
+        return (0, datetime.strptime(str(fila[0]), "%d/%m/%Y %H:%M:%S").timestamp(), "")
+    except ValueError:
+        return (1, 0.0, "")
 
 
 def _limpieza(db_manager, clave: str, titulo: str, texto: str, dias: int, boton: str):
@@ -74,15 +85,14 @@ def mostrar_historial():
 
     with st.container(key="panel_logs"):
         panel_cab("Registros del sistema", f"Últimos {len(df_logs)} registros, del más reciente al más antiguo")
-        buscar = st.text_input("Buscar", placeholder="Usuario, acción o detalle", key="logs_buscar")
-        df_f = df_logs
-        if buscar.strip():
-            q = buscar.strip().lower()
-            texto = df_logs.astype(str).agg(' '.join, axis=1).str.lower()
-            df_f = df_logs[texto.str.contains(q, regex=False)]
-        mostrar(tabla_df(df_f, alto=520, vacio="Ningún registro coincide con la búsqueda."))
-        st.caption(f"Mostrando {len(df_f)} de {len(df_logs)} registros.")
-        descargas(df_f, "historial_logs", "Logs", key="logs")
+        tabla_navegable_df(
+            "logs", df_logs,
+            filtros=[{"columna": c, "etiqueta": c} for c in ("Usuario", "Acción") if c in df_logs.columns],
+            fechas={"columna": "Fecha", "etiqueta": "Fecha"} if "Fecha" in df_logs.columns else None,
+            claves_orden={"Fecha": _clave_fecha},
+            placeholder="Usuario, acción o detalle", unidad="registros", por_pagina_inicial=25,
+            descarga=("historial_logs", "Logs"),
+        )
 
     if not get_auth_manager().es_superadmin_principal(st.session_state.get('admin_token')):
         mostrar(aviso("info", "Limpieza de registros",

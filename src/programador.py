@@ -49,7 +49,12 @@ def ciclo(ahora: Optional[datetime] = None, cierres=None, respaldos=None, db=Non
     def _agente(ahora_):
         from src.agentes.agente_operativo import procesar_programado
         return procesar_programado(ahora_)
-    for nombre, tarea in (("cierres", cierres.procesar), ("respaldos", respaldos.procesar), ("agente", _agente)):
+    def _avance(ahora_):
+        # SIREA 3.5: cifras de la portada precalculadas (cada 5 min) para que el inicio cargue al instante.
+        from src.avance_nacional import tarea_programada
+        return tarea_programada(ahora_ or datetime.now(timezone.utc), db=db or cierres.db)
+    for nombre, tarea in (("cierres", cierres.procesar), ("respaldos", respaldos.procesar), ("agente", _agente),
+                          ("avance", _avance)):
         try:
             r = tarea(ahora)
             if r:

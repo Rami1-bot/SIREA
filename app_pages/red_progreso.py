@@ -29,12 +29,24 @@ from app_pages.usuario_logica import (
 )
 from utils.tema import (
     mostrar, mostrar_aviso, kpi, icono, lista_estado, periodo_semana,
-    fecha_corte_info, texto_dias_restantes, AZUL, TONOS,
+    fecha_corte_info, texto_dias_restantes, AZUL, TONOS, barra, aplicar_css_red,
 )
 from utils.tema_admin import tabla_html, chip_porcentaje
+from utils.tabla_navegable import tabla_navegable
 from utils.tema import chip
 from utils.duplicados import solo_originales
 from app_pages.red_detalle import mostrar_detalle_envios_red
+
+
+def _n_semana(fila) -> int:
+    """Número de semana de una fila cuya primera columna dice 'Semana 39' o 'Semana 39 (actual)'."""
+    import re
+    m = re.search(r"\d+", str(fila[0]))
+    return int(m.group()) if m else 0
+
+
+def _chip_tardios(valor):
+    return chip(str(valor), "bad", "alerta") if valor else chip("0", "ok", "check")
 
 
 def _centros_enviados_de_envios(envios: list, excluidos_red: list) -> set:
@@ -97,20 +109,41 @@ def _grafico_evolucion(datos: list, semana_activa: int) -> str:
     for d in datos:
         pct = max(0, min(100, d['porcentaje']))
         activa = d['semana'] == semana_activa
-        color = AZUL if activa else "#7FB0D6"
+        color = "#2E9E5B" if pct >= 90 else ("#E3A72F" if pct >= 60 else "#D9534F")
+        borde = ";outline:3px solid #1D3F76;outline-offset:2px" if activa else ""
         h = max(2, round(pct / 100 * alto, 1))
         negrita = " act" if activa else ""
         columnas.append(
             f'<div class="sire-col{negrita}" title="Semana {d["semana"]}: {int(pct)} % '
             f'({d["recibidos"]} de {d["total"]} centros)">'
             f'<span class="pct">{int(pct)} %</span>'
-            f'<div style="height:{h}px;background:{color}"></div>'
+            f'<div style="height:{h}px;background:{color}{borde}"></div>'
             f'<span class="sem">S{d["semana"]}</span></div>'
         )
+    meta = f'<div class="sire-meta" style="bottom:{25 + round(0.9 * alto)}px"><span>Meta 90 %</span></div>'
     return (
         f'<div class="sire-chart{denso}" role="img" '
-        f'aria-label="Porcentaje de centros con envío por semana">{"".join(columnas)}</div>'
+        f'aria-label="Porcentaje de centros con envío por semana">{meta}{"".join(columnas)}</div>'
     )
+
+
+def _leyenda_y_resumen(datos: list) -> str:
+    """Leyenda de colores y tres cifras del periodo: promedio, mejor semana y semana más baja."""
+    if not datos:
+        return ""
+    prom = round(sum(d['porcentaje'] for d in datos) / len(datos))
+    mejor = max(datos, key=lambda d: d['porcentaje'])
+    peor = min(datos, key=lambda d: d['porcentaje'])
+    leyenda = ('<div class="sire-leyenda"><span><i style="background:#2E9E5B"></i>90 % o más</span>'
+               '<span><i style="background:#E3A72F"></i>60 – 89 %</span>'
+               '<span><i style="background:#D9534F"></i>menos de 60 %</span></div>')
+    minis = (
+        '<div class="sire-minis">'
+        f'<div class="sire-mini"><small>Promedio del periodo</small><b>{prom} %</b></div>'
+        f'<div class="sire-mini ok"><small>Mejor semana</small><b>S{mejor["semana"]} · {int(mejor["porcentaje"])} %</b></div>'
+        f'<div class="sire-mini bad"><small>Semana más baja</small><b>S{peor["semana"]} · {int(peor["porcentaje"])} %</b></div></div>'
+    )
+    return leyenda + minis
 
 
 def _grafico_tardios(datos: list, semana_activa: int) -> str:
@@ -142,7 +175,7 @@ def _grafico_tardios(datos: list, semana_activa: int) -> str:
 
 
 def _seccion_tardios(datos: list, anio: int, semana_inicio: int, semana_fin: int,
-                     semana_activa: int, es_anio_activo: bool):
+                     semana_activa: int, es_anio_activo: bool, red: str = ""):
     """Tabla y gráfico de barras: cuántos envíos tardíos hizo la red por semana."""
     mostrar('<h2 class="sire-h2">Envíos tardíos</h2>')
 
@@ -171,20 +204,21 @@ def _seccion_tardios(datos: list, anio: int, semana_inicio: int, semana_fin: int
         dentro = max(d['envios'] - d['tardios'], 0)
         filas.append([
             f"Semana {d['semana']}" + (" (actual)" if es_anio_activo and d['semana'] == semana_activa else ""),
-            d['envios'], dentro,
-            chip(str(d['tardios']), "bad", "alerta") if d['tardios'] else chip("0", "ok", "check"),
-            d['centros_tardios'],
+            d['envios'], dentro, d['tardios'], d['centros_tardios'],
         ])
     mostrar(
         f'<p class="sire-nota" style="margin:4px 0 12px">Envíos de la red por semana epidemiológica del reporte, '
         f'semanas {semana_inicio} a {semana_fin} · Año {anio}. Un envío es tardío si llegó después de la fecha de corte de su semana.</p>'
-        + tabla_html(
-            ['Semana', 'Envíos recibidos', 'Dentro del plazo', 'Envíos tardíos', 'Centros con envío tardío'],
-            filas,
-            crudas=['Envíos tardíos'],
-            derecha=['Envíos recibidos', 'Dentro del plazo', 'Envíos tardíos', 'Centros con envío tardío'],
-            alto=None if len(datos) <= 12 else 420,
-        )
+    )
+    tabla_navegable(
+        f"red_tardios_{anio}", ['Semana', 'Envíos recibidos', 'Dentro del plazo', 'Envíos tardíos', 'Centros con envío tardío'],
+        filas, chips={'Envíos tardíos': _chip_tardios},
+        derecha=['Envíos recibidos', 'Dentro del plazo', 'Envíos tardíos', 'Centros con envío tardío'],
+        unidad="semanas", buscar=False,
+        orden_opciones=[("Semana: más reciente primero", "Semana", True), ("Semana: más antigua primero", "Semana", False),
+                        ("Más envíos tardíos primero", "Envíos tardíos", True)],
+        orden_inicial="Semana: más reciente primero", claves_orden={"Semana": _n_semana},
+        descarga=(f"tardios_{red}_{anio}_sem{semana_inicio}-{semana_fin}".replace(" ", "_"), "Envíos tardíos"),
     )
     mostrar(
         '<p class="sire-nota" style="margin:20px 0 4px">Envíos tardíos por semana (barras)</p>'
@@ -204,9 +238,10 @@ def _tarjeta_lista(titulo: str, items: list, tono: str, etiqueta: str, vacio: st
     )
 
 
-def mostrar_progreso_red_login(red: str):
+def mostrar_progreso_red_login(red: str, despues_resumen=None):
     """Muestra el progreso de UNA sola red (solo lectura): semana activa, detalle y evolución."""
 
+    aplicar_css_red()
     db_manager = get_db_manager()
     red_sanitizada = sanitizar_html(red)
 
@@ -224,9 +259,13 @@ def mostrar_progreso_red_login(red: str):
     if av is None:
         mostrar_aviso("warn", "No se pudo consultar el avance de la semana activa",
                       "Intente nuevamente en unos minutos.")
+        if despues_resumen:
+            despues_resumen()
     elif av['total'] == 0:
         mostrar_aviso("info", f"La red {red_sanitizada} no tiene centros activos registrados",
                       "Todos sus centros están excluidos o aún no se han cargado.")
+        if despues_resumen:
+            despues_resumen()
         return
     else:
         total = av['total']
@@ -251,17 +290,24 @@ def mostrar_progreso_red_login(red: str):
             mostrar(kpi("Fecha límite", corte_fecha, corte_hora, ico="alerta" if dias == "plazo vencido" else "check",
                         tono="bad" if dias == "plazo vencido" else None))
 
+        # Gancho: «Cambiar contraseña» queda justo debajo de las tarjetas, fuera de la banda azul.
+        if despues_resumen:
+            despues_resumen()
+
         # ---- Detalle de la semana activa ----
         mostrar(f'<h2 class="sire-h2">Detalle de la semana {semana_activa}</h2>')
         if av['excluidos']:
             st.caption(f"{av['excluidos']} centro(s) excluido(s) por la OIIS no se cuentan en el avance.")
-        col1, col2 = st.columns(2, gap="medium")
-        with col1:
-            mostrar(_tarjeta_lista("Centros que ya enviaron", av['enviados'], "ok", "Enviado",
-                                   "Ningún centro ha enviado todavía."))
-        with col2:
-            mostrar(_tarjeta_lista("Centros pendientes", av['pendientes'], "warn", "Pendiente",
-                                   "Todos los centros enviaron."))
+        # Una sola tabla: los pendientes primero (es lo que hay que atender), con búsqueda y filtro.
+        filas_c = [[c, "Pendiente"] for c in av['pendientes']] + [[c, "Enviado"] for c in av['enviados']]
+        tabla_navegable(
+            "red_centros", ["Centro", "Estado"], filas_c,
+            chips={"Estado": lambda v: chip("Enviado", "ok", "check") if v == "Enviado" else chip("Pendiente", "warn", "reloj")},
+            unidad="centros", placeholder="Buscar un centro",
+            filtro={"columna": "Estado", "opciones": ["Pendiente", "Enviado"], "etiqueta": "Estado"},
+            orden_opciones=[("Centro: A → Z", "Centro", False), ("Centro: Z → A", "Centro", True)],
+            descarga=(f"centros_{red}_sem{semana_activa}".replace(" ", "_"), "Centros"),
+        )
 
     # ============================================================
     # QUIEN ENVIO, QUE SE RECIBIO Y OBSERVACIONES (v7.1)
@@ -318,34 +364,29 @@ def mostrar_progreso_red_login(red: str):
             mostrar_aviso("info", f"La red {red_sanitizada} no tiene centros activos registrados")
             return
 
-        # Tabla de cumplimiento (una fila, una columna por semana) y, debajo, el gráfico de barras.
-        fila = {'Red': red, 'Total Establecimientos': datos[0]['total']}
-        for d in datos:
-            fila[f"Semana {d['semana']}"] = d['porcentaje']
-
-        columnas_sem = [f"Sem. {d['semana']}" for d in datos]
+        # Tabla de cumplimiento: una fila por semana (la más reciente arriba) y, debajo, el gráfico de barras.
         mostrar(
             f'<p class="sire-nota" style="margin:4px 0 12px">Cumplimiento de la red: porcentaje de centros con envío, '
             f'semanas {semana_inicio} a {semana_fin} · Año {anio_seleccionado}.</p>'
-            + tabla_html(
-                ['Red', 'Centros'] + columnas_sem,
-                [[sanitizar_html(red), datos[0]['total']] + [d['porcentaje'] for d in datos]],
-                chips={c: chip_porcentaje for c in columnas_sem},
-                derecha=['Centros'],
-            ).replace('class="sire-tabla-wrap"', 'class="sire-tabla-wrap sire-nowrap"', 1)
+        )
+        es_anio_actual = anio_seleccionado == anio_activo_sistema
+        filas_ev = [[f"Semana {d['semana']}" + (" (actual)" if es_anio_actual and d['semana'] == semana_activa else ""),
+                     d['total'], d['recibidos'], d['porcentaje']] for d in datos]
+        tabla_navegable(
+            f"red_evolucion_{anio_seleccionado}", ['Semana', 'Centros de la red', 'Centros que enviaron', 'Cumplimiento'],
+            filas_ev, chips={'Cumplimiento': lambda v: barra(float(v))},
+            derecha=['Centros de la red', 'Centros que enviaron'], unidad="semanas", buscar=False,
+            orden_opciones=[("Semana: más reciente primero", "Semana", True), ("Semana: más antigua primero", "Semana", False),
+                            ("Cumplimiento: de menor a mayor", "Cumplimiento", False),
+                            ("Cumplimiento: de mayor a menor", "Cumplimiento", True)],
+            orden_inicial="Semana: más reciente primero", claves_orden={"Semana": _n_semana},
+            descarga=(f"progreso_{red}_{anio_seleccionado}_sem{semana_inicio}-{semana_fin}".replace(" ", "_"), "Cumplimiento"),
         )
         mostrar(
             '<p class="sire-nota" style="margin:20px 0 4px">Evolución por semana (barras)</p>'
-            + _grafico_evolucion(datos, semana_activa if anio_seleccionado == anio_activo_sistema else -1)
+            + _grafico_evolucion(datos, semana_activa if es_anio_actual else -1)
+            + _leyenda_y_resumen(datos)
         )
 
-        # Descargas
-        df_progreso = pd.DataFrame([fila])
-        d1, d2, _ = st.columns([1, 1, 2])
-        with d1:
-            descargar_csv(df_progreso, f"progreso_{red}_{anio_seleccionado}")
-        with d2:
-            descargar_excel(df_progreso, f"progreso_{red}_{anio_seleccionado}")
-
         _seccion_tardios(datos, anio_seleccionado, semana_inicio, semana_fin, semana_activa,
-                         es_anio_activo=(anio_seleccionado == anio_activo_sistema))
+                         es_anio_activo=(anio_seleccionado == anio_activo_sistema), red=red)

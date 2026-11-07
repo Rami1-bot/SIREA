@@ -11,14 +11,16 @@ import io
 from datetime import datetime
 from typing import Optional, List
 
+from src.config import Config
 from src.db_manager import get_db_manager
 from src.data_loader import get_data_loader
 from utils.helpers import sanitizar_html, sanitizar_lista_html
 from app_pages.admin_helpers import requerir_admin
 from utils.tema import mostrar, aviso
 from utils.tema_admin import (
-    tabla_df, chip_porcentaje, chip_nivel, barras_h, lista_cumplimiento, panel_cab,
+    tabla_df, chip_porcentaje, chip_nivel, barras_h, lista_cumplimiento, panel_cab, nivel_de, chip_nivel_texto,
 )
+from utils.tabla_navegable import tabla_navegable_df
 
 
 def obtener_centros_excluidos() -> dict:
@@ -96,6 +98,12 @@ def barra_progreso_html(porcentaje: float, ancho: int = 120) -> str:
     return barra(max(0, min(100, porcentaje)))
 
 
+def _subtitulo_excel(nombre: str) -> str:
+    import re
+    a = re.search(r"(20\d{2})", nombre or "")
+    return f"Año {a.group(1)}" if a else ""
+
+
 def descargar_csv(df: pd.DataFrame, nombre: str):
     """Descarga un DataFrame como CSV."""
     csv = df.to_csv(index=False).encode('utf-8-sig')
@@ -110,13 +118,11 @@ def descargar_csv(df: pd.DataFrame, nombre: str):
     )
 
 
-def descargar_excel(df: pd.DataFrame, nombre: str):
-    """Descarga un DataFrame como Excel."""
+def descargar_excel(df: pd.DataFrame, nombre: str, titulo: str = "Progreso por red"):
+    """Descarga un DataFrame como Excel con formato corporativo."""
     try:
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Datos')
-        excel_data = output.getvalue()
+        from src.excel_corporativo import generar_excel_df
+        excel_data = generar_excel_df(df, hoja=titulo, titulo=titulo, subtitulo=_subtitulo_excel(nombre))
         return st.download_button(
             label='Descargar Excel',
             icon=':material/download:',
@@ -200,6 +206,14 @@ def mostrar_progreso_redes():
     semanas_disponibles = list(range(1, semanas_max + 1))
     opciones_redes = ["Todas"] + todas_las_redes
 
+    # Por defecto: desde 10 semanas antes hasta la semana de corte (la activa). Cargar las 52 o 53 demora demasiado.
+    try:
+        semana_corte = int(Config.get_semana_actual())
+    except Exception:
+        semana_corte = semanas_disponibles[-1]
+    idx_fin = semanas_disponibles.index(semana_corte) if semana_corte in semanas_disponibles else len(semanas_disponibles) - 1
+    idx_ini = max(0, idx_fin - 9)
+
     total_excluidos = sum(len(c) for c in centros_excluidos.values())
     if total_excluidos > 0:
         mostrar(aviso("info", f"{total_excluidos} centros están excluidos del conteo",
@@ -222,12 +236,12 @@ def mostrar_progreso_redes():
             )
         with col2:
             semana_inicio = st.selectbox(
-                "Semana de inicio", options=semanas_disponibles, index=0, key="progreso_semana_inicio"
+                "Semana de inicio", options=semanas_disponibles, index=idx_ini, key="progreso_semana_inicio"
             )
         with col3:
             semana_fin = st.selectbox(
                 "Semana de fin", options=semanas_disponibles,
-                index=len(semanas_disponibles) - 1, key="progreso_semana_fin"
+                index=idx_fin, key="progreso_semana_fin"
             )
 
         redes_seleccionadas = st.multiselect(
@@ -245,6 +259,8 @@ def mostrar_progreso_redes():
             return
 
         semanas = list(range(semana_inicio, semana_fin + 1))
+        if len(semanas) > 20:
+            st.caption(f"Eligió {len(semanas)} semanas: la consulta puede demorar. Por defecto se muestran las últimas 10 hasta la semana de corte.")
 
         datos_progreso = []
         for red in redes_a_procesar:
@@ -263,8 +279,17 @@ def mostrar_progreso_redes():
             return
 
         df_progreso = pd.DataFrame(datos_progreso)
-        chips = {f'S{sem}': chip_porcentaje for sem in semanas}
-        mostrar(tabla_df(df_progreso, chips=chips, derecha=('Total de centros',)))
+        cols_sem = [f'S{sem}' for sem in semanas]
+        df_progreso.insert(2, 'Promedio', df_progreso[cols_sem].mean(axis=1).round(1))
+        df_progreso.insert(3, 'Situación', df_progreso['Promedio'].apply(nivel_de))
+        chips = {c: chip_porcentaje for c in cols_sem}
+        chips.update({'Promedio': chip_porcentaje, 'Situación': chip_nivel_texto})
+        tabla_navegable_df(
+            "prog_matriz", df_progreso, chips=chips, derecha=('Total de centros', 'Promedio', *cols_sem),
+            filtro={"columna": "Situación", "opciones": ["Completo", "Parcial", "Bajo"], "etiqueta": "Situación (promedio)"},
+            filtros=[{"columna": "Red", "etiqueta": "Red"}],
+            columnas_elegibles=True, nowrap=True, placeholder="Nombre de la red", unidad="redes", por_pagina_inicial=25,
+        )
         st.caption(f"{len(datos_progreso)} redes · {len(semanas)} semanas · año {anio_seleccionado}. "
                    "Verde: 90 % o más · Ámbar: 60 % a 89 % · Rojo: menos de 60 %.")
 
@@ -272,7 +297,7 @@ def mostrar_progreso_redes():
         with c1:
             descargar_csv(df_progreso, f"progreso_redes_{anio_seleccionado}")
         with c2:
-            descargar_excel(df_progreso, f"progreso_redes_{anio_seleccionado}")
+            descargar_excel(df_progreso, f"progreso_redes_{anio_seleccionado}", "Cumplimiento semana a semana")
 
     # ============================================================
     # ANALISIS DE CUMPLIMIENTO (independiente de los filtros de arriba)
@@ -290,12 +315,12 @@ def mostrar_progreso_redes():
             )
         with col2:
             semana_analisis_inicio = st.selectbox(
-                "Semana de inicio", options=semanas_disponibles, index=0, key="analisis_semana_inicio"
+                "Semana de inicio", options=semanas_disponibles, index=idx_ini, key="analisis_semana_inicio"
             )
         with col3:
             semana_analisis_fin = st.selectbox(
                 "Semana de fin", options=semanas_disponibles,
-                index=len(semanas_disponibles) - 1, key="analisis_semana_fin"
+                index=idx_fin, key="analisis_semana_fin"
             )
 
         redes_analisis = st.multiselect(
@@ -309,6 +334,8 @@ def mostrar_progreso_redes():
             return
 
         semanas_analisis = list(range(semana_analisis_inicio, semana_analisis_fin + 1))
+        if len(semanas_analisis) > 20:
+            st.caption(f"Eligió {len(semanas_analisis)} semanas: la consulta puede demorar.")
 
         datos_analisis = []
         for red in redes_analisis_procesar:
@@ -354,8 +381,17 @@ def mostrar_progreso_redes():
             'Estado': 'Completo' if d['Porcentaje'] >= 100 else ('Parcial' if d['Porcentaje'] >= 50 else 'Bajo'),
         } for d in datos_analisis])
 
+        tabla_navegable_df(
+            "prog_analisis", df_analisis_display, chips={'Estado': chip_nivel_texto},
+            derecha=('Total Centros', 'Envíos Recibidos', 'Porcentaje de Cumplimiento'),
+            filtro={"columna": "Estado", "opciones": ["Completo", "Parcial", "Bajo"], "etiqueta": "Estado"},
+            filtros=[{"columna": "Red", "etiqueta": "Red"}],
+            placeholder="Nombre de la red", unidad="redes", por_pagina_inicial=25,
+            orden_inicial="Porcentaje de Cumplimiento: de menor a mayor",
+        )
+
         c1, c2, _ = st.columns([1, 1, 2.2])
         with c1:
             descargar_csv(df_analisis_display, f"analisis_cumplimiento_{anio_analisis}")
         with c2:
-            descargar_excel(df_analisis_display, f"analisis_cumplimiento_{anio_analisis}")
+            descargar_excel(df_analisis_display, f"analisis_cumplimiento_{anio_analisis}", "Análisis de cumplimiento por red")

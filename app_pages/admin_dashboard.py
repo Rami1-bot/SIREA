@@ -11,9 +11,10 @@ from src.config import Config
 from src.db_manager import get_db_manager
 from src.data_loader import get_data_loader
 from utils.helpers import sanitizar_html
+from utils.tabla_navegable import tabla_navegable_df
 from utils.tema import kpi, mostrar, aviso
 from utils.tema_admin import (
-    esc, chip_estado, etiqueta_estado, chip_nivel, chip_porcentaje,
+    esc, chip_estado, etiqueta_estado, chip_nivel, chip_porcentaje, nivel_de, chip_nivel_texto,
     tabla_df, tabla_html, barras_h, lista_cumplimiento, panel_cab, vacio,
     descargas,
 )
@@ -23,13 +24,6 @@ from app_pages.admin_helpers import (
     obtener_centros_excluidos,
     requerir_admin,
 )
-
-_FILTRO_ESTADOS = {
-    "Todos": None,
-    "Recibido a tiempo": "APROBADO",
-    "Observado": "OBSERVADO",
-    "Envío tardío": "ATRASADO",
-}
 
 
 def _porcentaje(parte, total):
@@ -213,42 +207,36 @@ def mostrar_dashboard_principal():
     with st.container(key="panel_tabla_control"):
         panel_cab(f"Tabla de control · Semana {semana_activa}/{anio_activo}" + (f" · {red_filtro}" if red_filtro else ""))
 
-        f2, f3 = st.columns(2)
-        with f2:
-            sel_estado = st.selectbox("Estado", list(_FILTRO_ESTADOS), key="dash_filtro_estado")
-        with f3:
-            buscar = st.text_input("Buscar", placeholder="Responsable o centro", key="dash_filtro_buscar")
-
-        df_f = df_display
-        estado_db = _FILTRO_ESTADOS[sel_estado]
-        if estado_db:
-            df_f = df_f[df_f['Estado'].astype(str).str.upper() == estado_db]
-        if buscar.strip():
-            q = buscar.strip().lower()
-            texto = (df_f['Nombres'] + ' ' + df_f['Apellidos'] + ' ' + df_f['Centro']).str.lower()
-            df_f = df_f[texto.str.contains(q, regex=False)]
-
         vista = pd.DataFrame({
-            'Responsable': (df_f['Nombres'] + ' ' + df_f['Apellidos']).str.strip(),
-            'Red': df_f['Red'],
-            'Centro': df_f['Centro'],
-            'Tipo de reporte': df_f['Tipo de reporte'].str.replace('Hospitalizacion', 'Hospitalización', regex=False),
-            'Fecha de envío': df_f['Fecha de envío'],
-            'Estado': df_f['Estado'],
-            'Observación': df_f['Observación'],
+            'Responsable': (df_display['Nombres'] + ' ' + df_display['Apellidos']).str.strip(),
+            'Red': df_display['Red'],
+            'Centro': df_display['Centro'],
+            'Tipo de reporte': df_display['Tipo de reporte'].str.replace('Hospitalizacion', 'Hospitalización', regex=False),
+            'Fecha de envío': df_display['Fecha de envío'],
+            'Estado': df_display['Estado'],
+            'Observación': df_display['Observación'],
         })
         if not (vista['Observación'].astype(str).str.strip() != '').any():
             vista = vista.drop(columns=['Observación'])
-        mostrar(tabla_df(vista, chips={'Estado': chip_estado}, vacio="Ningún registro coincide con los filtros."))
-        st.caption(f"Mostrando {len(df_f)} de {len(df_display)} registros.")
+        estados = sorted({str(e) for e in vista['Estado'] if e})
+        tabla_navegable_df(
+            "dash_control", vista,
+            chips={'Estado': chip_estado},
+            filtro={"columna": "Estado", "opciones": estados, "etiqueta": "Estado",
+                    "nombres": {e: etiqueta_estado(e) for e in estados}},
+            filtros=[{"columna": "Red", "etiqueta": "Red"},
+                     {"columna": "Centro", "etiqueta": "Centro", "depende_de": "Red"},
+                     {"columna": "Tipo de reporte", "etiqueta": "Tipo de reporte"}],
+            fechas={"columna": "Fecha de envío", "etiqueta": "Envío"},
+            columnas_elegibles=True, ocultas=('Observación',),
+            placeholder="Responsable, red o centro", unidad="registros",
+            descarga=(f"tabla_control_semana_{semana_activa}_{anio_activo}", "Tabla de control"),
+            formato_descarga={'Estado': etiqueta_estado},
+        )
 
         excluidos_total = sum(len(c) for c in centros_excluidos.values())
         if excluidos_total > 0:
             st.caption(f"{excluidos_total} centros están excluidos del conteo por casos excepcionales.")
-
-        df_export = df_display.copy()
-        df_export['Estado'] = df_export['Estado'].apply(etiqueta_estado)
-        descargas(df_export, f"tabla_control_semana_{semana_activa}_{anio_activo}", "Tabla de control", key="dash_tabla")
 
     # ------------------------------------------------------------
     # Resumen de cumplimiento por red
@@ -267,17 +255,15 @@ def mostrar_dashboard_principal():
                 'Recibidos': d['recibidos'],
                 'Pendientes': d['pendientes'],
                 '% de cumplimiento': d['porcentaje'],
-                'Situación': d['porcentaje'],
+                'Situación': nivel_de(d['porcentaje']),
             } for d in datos_progreso_redes])
-            mostrar(tabla_df(
-                df_resumen,
-                chips={'% de cumplimiento': chip_porcentaje, 'Situación': chip_nivel},
-                derecha=('Total de centros', 'Recibidos', 'Pendientes'),
-            ))
-            df_resumen_exp = df_resumen.copy()
-            df_resumen_exp['% de cumplimiento'] = df_resumen_exp['% de cumplimiento'].apply(lambda x: f"{x:.1f}%")
-            df_resumen_exp['Situación'] = [
-                'Completo' if d['porcentaje'] >= 100 else ('Parcial' if d['porcentaje'] >= 50 else 'Bajo')
-                for d in datos_progreso_redes
-            ]
-            descargas(df_resumen_exp, f"progreso_cumplimiento_semana_{semana_activa}_{anio_activo}", "Progreso", key="dash_resumen")
+            tabla_navegable_df(
+                "dash_resumen", df_resumen,
+                chips={'% de cumplimiento': chip_porcentaje, 'Situación': chip_nivel_texto},
+                derecha=('Total de centros', 'Recibidos', 'Pendientes', '% de cumplimiento'),
+                filtro={"columna": "Situación", "opciones": ["Completo", "Parcial", "Bajo"], "etiqueta": "Situación"},
+                filtros=[{"columna": "Red", "etiqueta": "Red"}],
+                placeholder="Nombre de la red", unidad="redes", por_pagina_inicial=25,
+                descarga=(f"progreso_cumplimiento_semana_{semana_activa}_{anio_activo}", "Progreso"),
+                formato_descarga={'% de cumplimiento': lambda v: f"{float(v):.1f}%"},
+            )

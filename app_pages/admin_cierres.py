@@ -25,7 +25,7 @@ from src.solicitudes_password import fecha_lima
 from utils.corte_ui import campos_corte, texto_corte
 from utils.tema import aviso, chip, kpi, mostrar
 from utils.tema_admin import esc, panel_cab, tabla_df
-from app_pages.admin_helpers import actor_actual, requerir_admin
+from app_pages.admin_helpers import actor_actual, requerir_admin, boton_protegido
 
 _ESTADO_CIERRE = {
     "PROVISIONAL": ("Por validar", "warn", "reloj"),
@@ -569,22 +569,31 @@ def mostrar_respaldos():
         from src.permisos import get_permisos
         actor = actor_actual()
         if not get_permisos().tiene(actor, "RESPALDO_MANUAL"):
-            mostrar(aviso("warn", "No tiene el permiso de respaldo manual",
-                          "Pídale a oiis.winepi que se lo asigne en «Permisos de operación». Los respaldos automáticos siguen su curso."))
-            return
-        conf = st.checkbox("Confirmo que deseo hacer un respaldo ahora", key="resp_ok")
-        if st.button("Respaldar ahora", type="primary", icon=":material/backup:", key="resp_btn"):
-            if not conf:
-                st.info("Marque la casilla de confirmación para continuar.")
-            else:
-                with st.spinner("Respaldando..."):
-                    info = resp.ejecutar(ahora_lima(), "MANUAL", usuario)
-                get_auditoria().registrar(usuario, "RESPALDO_MANUAL", "RESPALDOS", rol=actor.get("rol"), objeto=info.get("nombre"),
-                                          resultado="OK" if info["ok"] else "ERROR",
-                                          detalle={"destino": info.get("destino"), "registros": info.get("total_filas"),
-                                                   "motivo": info.get("motivo")})
-                if info["ok"]:
-                    st.toast(f"Respaldo {info['nombre']} completado.", icon=":material/check_circle:")
-                    st.rerun()
+            from app_pages.solicitar_permiso import aviso_sin_permiso
+            aviso_sin_permiso("RESPALDO_MANUAL", "No puede hacer respaldos manuales",
+                              "el cuadro «Solicitar acceso» de más abajo. Los respaldos automáticos siguen su curso")
+            boton_protegido(False, "Respaldar ahora", key="resp_btn",
+                            ayuda_bloqueo="Requiere el permiso «Respaldo manual». Pídalo en «Solicitar acceso».")
+            sin_permiso_respaldo = True
+        else:
+            sin_permiso_respaldo = False
+        if not sin_permiso_respaldo:
+            conf = st.checkbox("Confirmo que deseo hacer un respaldo ahora", key="resp_ok")
+            if st.button("Respaldar ahora", type="primary", icon=":material/backup:", key="resp_btn"):
+                if not conf:
+                    st.info("Marque la casilla de confirmación para continuar.")
                 else:
-                    mostrar(aviso("bad", "No se pudo completar el respaldo", esc(info.get("motivo") or "")))
+                    with st.spinner("Respaldando..."):
+                        info = resp.ejecutar(ahora_lima(), "MANUAL", usuario)
+                    get_auditoria().registrar(usuario, "RESPALDO_MANUAL", "RESPALDOS", rol=actor.get("rol"), objeto=info.get("nombre"),
+                                              resultado="OK" if info["ok"] else "ERROR",
+                                              detalle={"destino": info.get("destino"), "registros": info.get("total_filas"),
+                                                       "motivo": info.get("motivo")})
+                    if info["ok"]:
+                        st.toast(f"Respaldo {info['nombre']} completado.", icon=":material/check_circle:")
+                        st.rerun()
+                    else:
+                        mostrar(aviso("bad", "No se pudo completar el respaldo", esc(info.get("motivo") or "")))
+
+    from app_pages.solicitar_permiso import cuadro_solicitud
+    cuadro_solicitud(["RESPALDO_MANUAL"], "sol_resp")

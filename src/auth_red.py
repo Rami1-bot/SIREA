@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
 from src.db_manager import get_db_manager
-from src.password_policy import validar as validar_password
+from src.password_policy import PERFIL_RED, validar as validar_password
 from src.security import hash_password, verificar_password
 
 
@@ -271,7 +271,8 @@ class RedAuthManager:
             if not solicitudes.habilitada(red):
                 return False, "El cambio de contraseña requiere la aprobación de la OIIS. Envíe una solicitud con su sustento."
 
-        valida, motivo = validar_password(password_nueva, contexto=[red])
+        # Perfil de las redes: más amable que el del panel de administración (ver password_policy).
+        valida, motivo = validar_password(password_nueva, contexto=[red], perfil=PERFIL_RED)
         if not valida:
             return False, motivo
         # No se puede reutilizar la contraseña vigente (la temporal incluida).

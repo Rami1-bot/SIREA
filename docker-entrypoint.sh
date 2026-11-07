@@ -20,6 +20,14 @@ if [ "$(id -u)" = "0" ]; then
     else
         echo "AVISO: no se encontró la credencial de Google en $ORIGEN (¿se montó la carpeta credentials/?)" >&2
     fi
+    # SIREA 3.5: secrets.toml del servidor (montado en /app/.streamlit-host) a un sitio privado legible por "sire".
+    if [ -f /app/.streamlit-host/secrets.toml ]; then
+        mkdir -p /run/sire
+        chown 10001:10001 /run/sire
+        chmod 700 /run/sire
+        install -m 400 -o 10001 -g 10001 /app/.streamlit-host/secrets.toml /run/sire/secrets.toml
+        export SIREA_SECRETS_PATH=/run/sire/secrets.toml
+    fi
     export HOME=/home/sire
     exec setpriv --reuid=10001 --regid=10001 --clear-groups -- "$@"
 fi

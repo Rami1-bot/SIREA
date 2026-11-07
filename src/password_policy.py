@@ -19,6 +19,14 @@ Requisitos:
   5. Sin secuencias (1234, abcd, qwerty) ni caracteres repetidos (aaaa).
   6. Distinta de la contraseña actual o temporal.
 
+Hay dos perfiles:
+  * "estricto" (por defecto): el de arriba. Lo usa el panel de administración.
+  * "red": el de las redes. Es más amable, porque las redes solo envían
+    reportes: mínimo 8 caracteres; letras y al menos un número (o una frase de
+    12 o más caracteres, que no necesita números); y se mantienen los bloqueos
+    que sí protegen: contraseña común, usuario/red/institución dentro de la
+    clave y secuencias o repeticiones.
+
 Las contraseñas nunca se guardan ni se registran aquí: este módulo solo las
 evalúa en memoria.
 """
@@ -31,6 +39,12 @@ from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 LONGITUD_MINIMA = 10
+PERFIL_ESTRICTO = "estricto"
+PERFIL_RED = "red"
+# Perfil de las redes.
+LONGITUD_MINIMA_RED = 8
+# Desde este largo (una frase) ya no se exigen mezclar letras y números.
+LONGITUD_FRASE_RED = 12
 # Tope por la forma en que se cifran las contraseñas (bcrypt: 72 bytes; las tildes y la ñ ocupan 2).
 LONGITUD_MAXIMA = 64
 BYTES_MAXIMOS = 72
@@ -188,9 +202,10 @@ def evaluar(
     password: str,
     contexto: Sequence[str] = (),
     actual: Optional[str] = None,
+    perfil: str = PERFIL_ESTRICTO,
 ) -> List[Requisito]:
     """
-    Evalúa una contraseña contra todos los requisitos.
+    Evalúa una contraseña contra todos los requisitos del perfil.
 
     contexto: usuario, red, nombre o correo de quien la usará (no deben
               aparecer dentro de la contraseña).
@@ -200,6 +215,12 @@ def evaluar(
     fragmentos = _fragmentos_contexto(contexto)
     plano = _destransformar(p)
     usa_contexto = any(f in plano for f in fragmentos)
+
+    if perfil == PERFIL_RED:
+        reqs = _requisitos_red(p, plano, usa_contexto)
+        if actual is not None:
+            reqs.append(_req_distinta(p, actual))
+        return reqs
 
     reqs = [
         Requisito(
@@ -247,18 +268,65 @@ def evaluar(
         ),
     ]
     if actual is not None:
-        reqs.append(Requisito(
-            "distinta", "Distinta de la contraseña actual o temporal",
-            "La contraseña temporal la conoce quien la entregó; si no se cambia por una nueva, deja de ser privada.",
-            bool(p) and p != actual,
-        ))
+        reqs.append(_req_distinta(p, actual))
     return reqs
+
+
+def _req_distinta(p: str, actual: str) -> Requisito:
+    return Requisito(
+        "distinta", "Distinta de la contraseña actual o temporal",
+        "La contraseña temporal la conoce quien la entregó; si no se cambia por una nueva, deja de ser privada.",
+        bool(p) and p != actual,
+    )
+
+
+def _requisitos_red(p: str, plano: str, usa_contexto: bool) -> List[Requisito]:
+    """Requisitos del perfil de las redes (ver el encabezado del módulo)."""
+    largo = len(p)
+    tiene_letra = bool(re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", p))
+    tiene_numero = bool(re.search(r"\d", p))
+    return [
+        Requisito(
+            "largo", f"Al menos {LONGITUD_MINIMA_RED} caracteres",
+            "Cada carácter adicional hace mucho más difícil adivinarla. Con menos de 8 se descubre en minutos.",
+            largo >= LONGITUD_MINIMA_RED,
+        ),
+        Requisito(
+            "largo_max", f"No más de {LONGITUD_MAXIMA} caracteres",
+            "El sistema solo puede cifrar las primeras 72 posiciones (las tildes y la ñ cuentan doble); "
+            "lo que sobre no protegería nada.",
+            largo <= LONGITUD_MAXIMA and len(p.encode("utf-8")) <= BYTES_MAXIMOS,
+        ),
+        Requisito(
+            "letras_numero", f"Letras y al menos un número (o una frase de {LONGITUD_FRASE_RED} o más caracteres)",
+            "Mezclar letras y números la aleja de las palabras sueltas. Si prefiere una frase larga, "
+            f"con {LONGITUD_FRASE_RED} o más caracteres no necesita números.",
+            (tiene_letra and tiene_numero) or largo >= LONGITUD_FRASE_RED,
+        ),
+        Requisito(
+            "comun", "No ser una contraseña muy usada",
+            "Las contraseñas como «123456», «Essalud2026» o «clave123» están en las listas que se usan en los ataques. "
+            "Son lo primero que se prueba.",
+            bool(p) and not _es_comun(p),
+        ),
+        Requisito(
+            "contexto", "No contener el nombre de su red ni palabras como «EsSalud» u «OIIS»",
+            "Quien intente entrar probará primero datos que conoce: el nombre de la red o la institución.",
+            bool(p) and not usa_contexto and _contiene_institucion(p) is None,
+        ),
+        Requisito(
+            "patron", "Sin secuencias ni repeticiones (1234, abcd, aaaa)",
+            "Los patrones fáciles de teclear también son fáciles de adivinar, aunque la contraseña sea larga.",
+            bool(p) and not _tiene_secuencia(p) and not _tiene_repeticion(p),
+        ),
+    ]
 
 
 def validar(
     password: str,
     contexto: Sequence[str] = (),
     actual: Optional[str] = None,
+    perfil: str = PERFIL_ESTRICTO,
 ) -> Tuple[bool, str]:
     """
     Devuelve (True, "") si la contraseña es aceptable o (False, mensaje) con
@@ -266,13 +334,14 @@ def validar(
     """
     if not password:
         return False, "Escriba una contraseña."
-    faltan = [r.texto for r in evaluar(password, contexto, actual) if not r.cumple]
+    faltan = [r.texto for r in evaluar(password, contexto, actual, perfil) if not r.cumple]
     if not faltan:
         return True, ""
     return False, "La contraseña no es suficientemente segura. Falta o debe corregir: " + "; ".join(faltan) + "."
 
 
-def fuerza(password: str, contexto: Sequence[str] = (), actual: Optional[str] = None) -> Tuple[int, str]:
+def fuerza(password: str, contexto: Sequence[str] = (), actual: Optional[str] = None,
+           perfil: str = PERFIL_ESTRICTO) -> Tuple[int, str]:
     """
     Nivel de 0 a 4 y su etiqueta, para mostrar una barra de fortaleza:
     0 Vacía, 1 Muy débil, 2 Débil, 3 Aceptable, 4 Fuerte.
@@ -280,14 +349,35 @@ def fuerza(password: str, contexto: Sequence[str] = (), actual: Optional[str] = 
     """
     if not password:
         return 0, "Sin escribir"
-    reqs = evaluar(password, contexto, actual)
+    reqs = evaluar(password, contexto, actual, perfil)
     cumplidos = sum(1 for r in reqs if r.cumple)
     todos = all(r.cumple for r in reqs)
     if todos:
-        return (4, "Fuerte") if len(password) >= 14 else (3, "Aceptable")
+        largo_fuerte = LONGITUD_FRASE_RED if perfil == PERFIL_RED else 14
+        return (4, "Fuerte") if len(password) >= largo_fuerte else (3, "Aceptable")
     if cumplidos >= len(reqs) - 2:
         return 2, "Débil"
     return 1, "Muy débil"
+
+
+def datos_para_navegador(contexto: Sequence[str] = ()) -> dict:
+    """
+    Reglas del perfil «red» en forma de datos, para que el navegador marque los
+    requisitos mientras la persona escribe (components/password_vivo.js repite
+    estas mismas reglas). Nunca incluye una contraseña: solo la lista de claves
+    comunes, las palabras prohibidas y los límites. El servidor vuelve a validar todo.
+    """
+    return {
+        "min": LONGITUD_MINIMA_RED,
+        "max": LONGITUD_MAXIMA,
+        "bytes": BYTES_MAXIMOS,
+        "frase": LONGITUD_FRASE_RED,
+        "comunes": sorted(_COMUNES),
+        "largas": list(_COMUNES_LARGAS),
+        "inst": list(_PALABRAS_INSTITUCION),
+        "sec": list(_SECUENCIAS),
+        "ctx": _fragmentos_contexto(contexto),
+    }
 
 
 # ============================================================
@@ -316,6 +406,52 @@ def generar(longitud: int = 14) -> str:
         secrets.SystemRandom().shuffle(chars)
         candidata = "".join(chars)
         if validar(candidata)[0]:
+            return candidata
+    raise RuntimeError("No se pudo generar una contraseña que cumpla la política.")
+
+
+# ============================================================
+# CONTRASEÑA SUGERIDA PARA LAS REDES (legible y fácil de teclear)
+# ============================================================
+
+# Palabras cortas, sin tildes ni ñ, que no son contraseñas conocidas ni palabras de la institución.
+_PALABRAS_SUGERIDAS = (
+    'abeja', 'aguila', 'aldea', 'arbol', 'arena', 'arroz', 'avena', 'balsa',
+    'barco', 'beso', 'bosque', 'brisa', 'bruma', 'cabra', 'cacao', 'calle',
+    'campo', 'canoa', 'carta', 'casa', 'cerro', 'cielo', 'cinta', 'circo',
+    'clima', 'cobre', 'coco', 'colina', 'concha', 'copa', 'coral', 'corona',
+    'costa', 'cueva', 'cumbre', 'dado', 'delfin', 'dia', 'duna', 'ecos',
+    'espiga', 'estrella', 'faro', 'feria', 'fideo', 'flauta', 'flecha', 'flor',
+    'fogata', 'fresa', 'fruta', 'fuego', 'fuente', 'gallo', 'gato', 'globo',
+    'grano', 'grillo', 'guante', 'guitarra', 'hamaca', 'helado', 'hierba', 'hoja',
+    'hongo', 'huella', 'huerto', 'isla', 'jarra', 'jazmin', 'joya', 'juego',
+    'jungla', 'kiwi', 'lago', 'lampara', 'lana', 'lapiz', 'laurel', 'leche',
+    'lente', 'libro', 'lila', 'limon', 'llave', 'lluvia', 'lobo', 'luna',
+    'luz', 'madera', 'mango', 'mapa', 'marea', 'mesa', 'miel', 'molino',
+    'monte', 'mural', 'musgo', 'nido', 'nieve', 'nube', 'nuez', 'oasis',
+    'ola', 'olivo', 'orilla', 'oso', 'palma', 'pan', 'papel', 'pasto',
+    'pato', 'perla', 'pez', 'piedra', 'pino', 'playa', 'plaza', 'pluma',
+    'pozo', 'prado', 'puente', 'queso', 'radio', 'rama', 'rana', 'rayo',
+    'remo', 'rio', 'roble', 'roca', 'rosa', 'ruta', 'sal', 'selva',
+    'senda', 'sol', 'sombra', 'sopa', 'tarde', 'taza', 'techo', 'tela',
+    'tierra', 'tigre', 'tinta', 'tomate', 'torre', 'trigo', 'tucan', 'tulipan',
+    'uva', 'valle', 'vela', 'verde', 'viento', 'vino', 'violin', 'volcan',
+    'yate', 'zorro',
+)
+
+
+def generar_legible(contexto: Sequence[str] = (), palabras: int = 4) -> str:
+    """
+    Contraseña sugerida para una red: palabras sueltas y dos números, por ejemplo
+    «lluvia-faro-mango-roca-47». Es larga (supera con holgura las 12 posiciones de una
+    frase), se lee y se teclea sin errores, y cumple el perfil de las redes. Usa `secrets`.
+    """
+    for _ in range(200):
+        elegidas = [secrets.choice(_PALABRAS_SUGERIDAS) for _ in range(max(3, palabras))]
+        if len(set(elegidas)) < len(elegidas):
+            continue
+        candidata = "-".join(elegidas) + "-" + "".join(secrets.choice(string.digits) for _ in range(2))
+        if validar(candidata, contexto=contexto, perfil=PERFIL_RED)[0]:
             return candidata
     raise RuntimeError("No se pudo generar una contraseña que cumpla la política.")
 

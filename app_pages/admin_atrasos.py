@@ -12,8 +12,9 @@ from src.data_loader import get_data_loader
 from utils.helpers import sanitizar_html
 from utils.tema import kpi, mostrar, aviso
 from utils.tema_admin import (
-    chip_estado, etiqueta_estado, tabla_df, barras_h, panel_cab, descargas,
+    chip_estado, etiqueta_estado, barras_h, panel_cab,
 )
+from utils.tabla_navegable import tabla_navegable_df
 from app_pages.admin_helpers import (
     formatear_centro,
     formatear_fecha_columna,
@@ -201,11 +202,23 @@ def mostrar_control_atrasos():
             'Centro': df_display['Centro'],
             'Semana': df_display['Semana'],
             'Fecha de envío': df_display['Fecha de envío'],
-            'Atraso': df_display['Días de atraso'].apply(lambda x: f"{x} días" if x else "0 días"),
+            'Días de atraso': df_display['Días de atraso'].apply(lambda x: int(x or 0)),
             'Estado': df_display['Estado'],
+            'Observación': df_display['Observación'],
+            'Semana activa': df_display['Semana activa'],
+            'Año': df_display['Año'],
         })
-        mostrar(tabla_df(vista, chips={'Estado': chip_estado}, derecha=('Semana',)))
-
-        df_export = df_display.copy()
-        df_export['Estado'] = df_export['Estado'].apply(etiqueta_estado)
-        descargas(df_export, f"atrasos_semana_{semana_seleccionada}_{anio_seleccionado}", "Atrasos", key="atrasos")
+        estados = sorted({str(e) for e in vista['Estado'] if e})
+        tabla_navegable_df(
+            "atrasos", vista,
+            chips={'Estado': chip_estado}, derecha=('Semana', 'Días de atraso', 'Semana activa', 'Año'),
+            filtro={"columna": "Estado", "opciones": estados, "etiqueta": "Estado",
+                    "nombres": {e: etiqueta_estado(e) for e in estados}},
+            filtros=[{"columna": "Red", "etiqueta": "Red"}, {"columna": "Centro", "etiqueta": "Centro", "depende_de": "Red"}],
+            fechas={"columna": "Fecha de envío", "etiqueta": "Envío"},
+            columnas_elegibles=True, ocultas=('Observación', 'Semana activa', 'Año'),
+            orden_inicial="Días de atraso: de mayor a menor",
+            placeholder="Responsable, red o centro", unidad="registros",
+            descarga=(f"atrasos_semana_{semana_seleccionada}_{anio_seleccionado}", "Atrasos"),
+            formato_descarga={'Estado': etiqueta_estado},
+        )

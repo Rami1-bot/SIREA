@@ -16,7 +16,9 @@ from src.calendario_epi import (
     inicio_anio_epi, semanas_anio_epi, fin_desde_inicio, rango_semana, formatear_rango,
 )
 from utils.helpers import formatear_fecha
-from app_pages.admin_helpers import requerir_admin
+from app_pages.admin_helpers import requerir_admin, estado_configuracion, campo_motivo, limpiar_motivo, boton_cfg, aviso_solo_consulta
+from app_pages.solicitar_permiso import cuadro_solicitud
+from src.cambios_configuracion import get_cambios_configuracion
 from app_pages.admin_cierres import panel_validacion_semana, panel_cierre_vencido
 from utils.corte_ui import campos_corte, texto_corte
 from utils.tema import kpi, mostrar, aviso, chip
@@ -113,6 +115,10 @@ def mostrar_configuracion():
     # SUPER_ADMIN.
     # ============================================================
     requerir_admin()
+    # v7.5: cambiar fechas y años exige el permiso «Cambiar la configuración» y un motivo.
+    actor, puede = estado_configuracion()
+    cambios_cfg = get_cambios_configuracion()
+    boton = boton_cfg(puede)
 
     # ============================================================
     # OBTENER DATOS
@@ -161,6 +167,19 @@ def mostrar_configuracion():
     panel_validacion_semana()
 
     # ============================================================
+    # MOTIVO DEL CAMBIO (v7.5)
+    # ============================================================
+
+    with st.container(key="panel_cfg_motivo"):
+        panel_cab("Motivo del cambio", "Se pide para guardar cualquier cambio de esta pantalla y queda en la auditoría")
+        if not puede:
+            aviso_solo_consulta("No puede guardar cambios en la configuración")
+        motivo = campo_motivo("cfg_motivo", puede)
+        st.caption("Cada cambio guarda quién lo hizo, cuándo, el valor anterior y el nuevo, y avisa por correo al "
+                   "SUPER_ADMIN principal.")
+    cuadro_solicitud(["CONFIGURACION"], "sol_cfg")
+
+    # ============================================================
     # CONFIGURACIÓN GENERAL
     # ============================================================
 
@@ -191,42 +210,23 @@ def mostrar_configuracion():
             nuevo_tamano = st.number_input("Tamaño máximo ZIP (MB)", min_value=10, max_value=200,
                                            value=tamano_maximo_val, key=f"cfg_zip_{tamano_maximo_val}")
 
-        if st.button("Guardar parámetros", type="primary", icon=":material/save:", key="cfg_guardar_general"):
-            nueva_fecha_corte = nuevo_corte.strftime('%Y-%m-%d %H:%M:%S')
-            cambios = [
-                ('semana_activa', str(int(nueva_semana)), str(semana_actual_val), "Semana activa"),
-                ('fecha_corte', nueva_fecha_corte, str(fecha_corte_val or ''), "Fecha de corte"),
-                ('tamano_maximo_zip_mb', str(int(nuevo_tamano)), str(tamano_maximo_val), "Tamaño máximo ZIP"),
-            ]
-            fallos, hechos = [], []
-            for clave, nuevo, previo, etiqueta in cambios:
-                ok, detalle = db_manager.guardar_configuracion(clave, nuevo)
-                if ok:
-                    if nuevo != previo:
-                        hechos.append(f"{etiqueta}: {previo or '—'} → {nuevo}")
-                else:
-                    fallos.append(f"{etiqueta}: {detalle}")
-            if hechos:
-                db_manager.registrar_log(
-                    usuario=(st.session_state.get('admin_usuario') or {}).get('usuario', 'SYSTEM'),
-                    accion='CAMBIAR_CONFIGURACION', detalle="; ".join(hechos))
-            # Copia en .env solo como respaldo; en Docker puede ser de solo lectura.
-            try:
-                from dotenv import set_key
-                env_path = Config.BASE_DIR / ".env"
-                if env_path.exists():
-                    set_key(str(env_path), "SEMANA_ACTUAL", str(int(nueva_semana)))
-                    set_key(str(env_path), "FECHA_CORTE", nueva_fecha_corte)
-                    set_key(str(env_path), "TAMANO_MAXIMO_ZIP_MB", str(int(nuevo_tamano)))
-            except Exception:
-                pass
-            if fallos:
-                mostrar(aviso("bad", "No se guardó todo",
-                              "<br>".join(esc(f) for f in fallos)))
-            else:
-                st.toast("Parámetros guardados." if hechos else "No había cambios que guardar.",
-                         icon=":material/check_circle:")
+        salto = int(nueva_semana) != semana_actual_val and (
+            int(nueva_semana) < semana_actual_val or int(nueva_semana) > semana_actual_val + 2)
+        excepcional = False
+        if salto:
+            excepcional = st.checkbox(
+                "Es un cambio excepcional (retroceso o salto de semana)", key=f"cfg_excepcional_{semana_actual_val}",
+                disabled=not puede,
+                help="La semana activa normalmente avanza de 1 en 1. Retrocederla o saltar más de 2 semanas debe confirmarse.")
+        if boton("Guardar parámetros", type="primary", icon=":material/save:", key="cfg_guardar_general"):
+            ok, msg = cambios_cfg.guardar_parametros(actor, int(nueva_semana), nuevo_corte, int(nuevo_tamano), motivo, excepcional)
+            if ok:
+                if not msg.startswith("No había"):
+                    limpiar_motivo("cfg_motivo")
+                st.toast(msg, icon=":material/check_circle:")
                 st.rerun()
+            else:
+                mostrar(aviso("bad", "No se guardó", esc(msg)))
 
     # ============================================================
     # AÑOS EPIDEMIOLÓGICOS
@@ -246,12 +246,14 @@ def mostrar_configuracion():
                     help="Cambia el año activo del sistema"
                 )
             with col2:
-                if st.button("Activar año", type="primary", use_container_width=True, key="cfg_activar_top"):
-                    if db_manager.activar_anio_epidemiologico(nuevo_anio_activo):
-                        st.toast(f"Año {nuevo_anio_activo} activado.", icon=":material/check_circle:")
+                if boton("Activar año", type="primary", use_container_width=True, key="cfg_activar_top"):
+                    ok, msg = cambios_cfg.activar_anio(actor, int(nuevo_anio_activo), motivo)
+                    if ok:
+                        limpiar_motivo("cfg_motivo")
+                        st.toast(msg, icon=":material/check_circle:")
                         st.rerun()
                     else:
-                        mostrar(aviso("bad", "No se pudo activar el año"))
+                        mostrar(aviso("bad", "No se pudo activar el año", esc(msg)))
             with col3:
                 if st.button("Recargar", use_container_width=True, key="cfg_recargar"):
                     st.rerun()
@@ -271,7 +273,7 @@ def mostrar_configuracion():
             mostrar(aviso("warn", "No hay años configurados", "Agregue uno con el botón «Agregar año»."))
 
         st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
-        if st.button("Agregar año", icon=":material/add:", key="cfg_abrir_agregar"):
+        if boton("Agregar año", icon=":material/add:", key="cfg_abrir_agregar"):
             st.session_state.mostrar_agregar_anio = True
 
     # ============================================================
@@ -313,25 +315,16 @@ def mostrar_configuracion():
 
             col1, col2, _ = st.columns([1, 1, 2])
             with col1:
-                if st.button('Guardar año', type="primary", use_container_width=True, key="cfg_guardar_anio"):
-                    try:
-                        datetime.strptime(fecha_inicio_str, '%Y-%m-%d')
-                        datetime.strptime(fecha_fin_str, '%Y-%m-%d')
-
-                        existe = db_manager.obtener_anio_epidemiologico(nuevo_anio)
-                        if existe:
-                            mostrar(aviso("bad", f"El año {nuevo_anio} ya existe"))
-                        else:
-                            if db_manager.crear_anio_epidemiologico(
-                                nuevo_anio, nuevas_semanas, fecha_inicio_str, fecha_fin_str, activo=False
-                            ):
-                                st.toast(f"Año {nuevo_anio} agregado.", icon=":material/check_circle:")
-                                st.session_state.mostrar_agregar_anio = False
-                                st.rerun()
-                            else:
-                                mostrar(aviso("bad", "No se pudo crear el año"))
-                    except ValueError:
-                        mostrar(aviso("bad", "Formato de fecha inválido", "Use AAAA-MM-DD."))
+                if boton('Guardar año', type="primary", use_container_width=True, key="cfg_guardar_anio"):
+                    ok, msg = cambios_cfg.crear_anio(actor, int(nuevo_anio), int(nuevas_semanas),
+                                                     fecha_inicio_d, fecha_fin_d, motivo)
+                    if ok:
+                        limpiar_motivo("cfg_motivo")
+                        st.toast(msg, icon=":material/check_circle:")
+                        st.session_state.mostrar_agregar_anio = False
+                        st.rerun()
+                    else:
+                        mostrar(aviso("bad", "No se guardó el año", esc(msg)))
             with col2:
                 if st.button('Cancelar', use_container_width=True, key="cfg_cancelar_anio"):
                     st.session_state.mostrar_agregar_anio = False
@@ -381,23 +374,16 @@ def mostrar_configuracion():
 
                 col1, col2, _ = st.columns([1, 1, 2], vertical_alignment="center")
                 with col1:
-                    if st.button("Actualizar año", type="primary", use_container_width=True, key="cfg_actualizar_anio"):
-                        try:
-                            datetime.strptime(fecha_inicio_edit, '%Y-%m-%d')
-                            datetime.strptime(fecha_fin_edit, '%Y-%m-%d')
-
-                            if db_manager.actualizar_anio_epidemiologico(
-                                anio_editar,
-                                semanas=semanas_edit,
-                                fecha_inicio=fecha_inicio_edit,
-                                fecha_fin=fecha_fin_edit
-                            ):
-                                st.toast(f"Año {anio_editar} actualizado.", icon=":material/check_circle:")
-                                st.rerun()
-                            else:
-                                mostrar(aviso("bad", "No se pudo actualizar el año"))
-                        except ValueError:
-                            mostrar(aviso("bad", "Formato de fecha inválido", "Use AAAA-MM-DD."))
+                    if boton("Actualizar año", type="primary", use_container_width=True, key="cfg_actualizar_anio"):
+                        ok, msg = cambios_cfg.actualizar_anio(actor, int(anio_editar), int(semanas_edit),
+                                                              fecha_inicio_d, fecha_fin_d, motivo)
+                        if ok:
+                            if not msg.startswith("No había"):
+                                limpiar_motivo("cfg_motivo")
+                            st.toast(msg, icon=":material/check_circle:")
+                            st.rerun()
+                        else:
+                            mostrar(aviso("bad", "No se actualizó el año", esc(msg)))
                 with col2:
                     mostrar(_estado_anio(anio_data.get('activo', 0)))
 
@@ -416,12 +402,14 @@ def mostrar_configuracion():
                 with col1:
                     anio_seleccionado = st.selectbox("Año a activar", options=opciones_inactivos, key="anio_activar_gestion")
                 with col2:
-                    if st.button('Activar año', type="primary", use_container_width=True, key="cfg_activar_inactivo"):
-                        if db_manager.activar_anio_epidemiologico(anio_seleccionado):
-                            st.toast(f"Año {anio_seleccionado} activado.", icon=":material/check_circle:")
+                    if boton('Activar año', type="primary", use_container_width=True, key="cfg_activar_inactivo"):
+                        ok, msg = cambios_cfg.activar_anio(actor, int(anio_seleccionado), motivo)
+                        if ok:
+                            limpiar_motivo("cfg_motivo")
+                            st.toast(msg, icon=":material/check_circle:")
                             st.rerun()
                         else:
-                            mostrar(aviso("bad", "No se pudo activar el año"))
+                            mostrar(aviso("bad", "No se pudo activar el año", esc(msg)))
 
             with st.container(key="peligro_anio"):
                 mostrar(aviso("bad", "Eliminar un año inactivo",
@@ -432,15 +420,18 @@ def mostrar_configuracion():
                 with col2:
                     confirma = st.checkbox(f"Confirmo que deseo eliminar el año {anio_eliminar}", key="cfg_confirma_eliminar")
                 with col3:
-                    if st.button('Eliminar año', type="primary", use_container_width=True,
+                    if boton('Eliminar año', type="primary", use_container_width=True,
                                  icon=":material/delete:", key="cfg_eliminar_anio"):
                         if not confirma:
                             st.warning("Marque la casilla de confirmación para eliminar.")
-                        elif db_manager.eliminar_anio_epidemiologico(anio_eliminar):
-                            st.toast(f"Año {anio_eliminar} eliminado.", icon=":material/check_circle:")
-                            st.rerun()
                         else:
-                            mostrar(aviso("bad", "No se puede eliminar el año activo"))
+                            ok, msg = cambios_cfg.eliminar_anio(actor, int(anio_eliminar), motivo)
+                            if ok:
+                                limpiar_motivo("cfg_motivo")
+                                st.toast(msg, icon=":material/check_circle:")
+                                st.rerun()
+                            else:
+                                mostrar(aviso("bad", "No se eliminó el año", esc(msg)))
 
     # ============================================================
     # CONFIGURACIÓN DE AÑOS PERMITIDOS
@@ -453,26 +444,25 @@ def mostrar_configuracion():
         with col1:
             max_anteriores_nuevo = st.number_input(
                 "Años anteriores permitidos", min_value=0, max_value=5, value=max_anteriores,
-                help="0 = solo el año activo"
+                help="0 = solo el año activo", disabled=not puede
             )
         with col2:
-            permitir_anteriores_nuevo = st.checkbox("Permitir envíos de años anteriores", value=permitir_anteriores)
+            permitir_anteriores_nuevo = st.checkbox("Permitir envíos de años anteriores", value=permitir_anteriores,
+                                                    disabled=not puede)
             permitir_adelantados_nuevo = st.checkbox(
-                "Permitir envíos adelantados (semanas futuras)", value=permitir_adelantados
+                "Permitir envíos adelantados (semanas futuras)", value=permitir_adelantados, disabled=not puede
             )
 
-        if st.button('Guardar años permitidos', type="primary", icon=":material/save:", key="cfg_guardar_permitidos"):
-            resultados = [
-                db_manager.guardar_configuracion('años_anteriores_permitidos', str(max_anteriores_nuevo)),
-                db_manager.guardar_configuracion('permitir_anios_anteriores', str(permitir_anteriores_nuevo).lower()),
-                db_manager.guardar_configuracion('permitir_envios_adelantados', str(permitir_adelantados_nuevo).lower()),
-            ]
-            malos = [d for ok, d in resultados if not ok]
-            if malos:
-                mostrar(aviso("bad", "No se pudo guardar", "<br>".join(esc(m) for m in malos)))
-            else:
-                st.toast("Configuración de años guardada.", icon=":material/check_circle:")
+        if boton('Guardar años permitidos', type="primary", icon=":material/save:", key="cfg_guardar_permitidos"):
+            ok, msg = cambios_cfg.guardar_anios_permitidos(actor, int(max_anteriores_nuevo), bool(permitir_anteriores_nuevo),
+                                                           bool(permitir_adelantados_nuevo), motivo)
+            if ok:
+                if not msg.startswith("No había"):
+                    limpiar_motivo("cfg_motivo")
+                st.toast(msg, icon=":material/check_circle:")
                 st.rerun()
+            else:
+                mostrar(aviso("bad", "No se pudo guardar", esc(msg)))
 
         if anios_permitidos:
             st.caption(f"Años permitidos actualmente ({len(anios_permitidos)}): {', '.join(map(str, anios_permitidos))}")
@@ -489,7 +479,7 @@ def mostrar_configuracion():
         valor_actual = str(db_manager.obtener_configuracion('alertas_correo_admin') or '').strip().lower() == 'true'
         alertas_nuevo = st.checkbox(
             "Enviar por correo un aviso a los administradores cuando un envío sea tardío, observado o duplicado",
-            value=valor_actual, key="cfg_alertas_correo")
+            value=valor_actual, key="cfg_alertas_correo", disabled=not puede)
         st.caption("Quien envía siempre recibe su acuse. Los correos de seguridad (contraseñas, respaldos, cierres) no cambian.")
         if alertas_nuevo != valor_actual:
             ok, detalle = db_manager.guardar_configuracion('alertas_correo_admin', str(alertas_nuevo).lower())

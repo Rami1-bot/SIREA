@@ -41,6 +41,8 @@ CATEGORIAS = {
     "CONFIGURACION": "Configuración",
     "CIERRES": "Cierres y resúmenes",
     "SISTEMA": "Sistema y registros",
+    "NOTIFICACIONES": "Notificaciones",
+    "SEGURIDAD": "Seguridad",
     "GENERAL": "General",
 }
 
@@ -55,6 +57,10 @@ ETIQUETAS = {
     "RETIRO_ARCHIVO": "Retiro de un archivo",
     "PERMISO_OTORGADO": "Otorgó un permiso",
     "PERMISO_REVOCADO": "Revocó un permiso",
+    "SOLICITUD_PERMISO": "Pidió un permiso",
+    "SOLICITUD_PERMISO_APROBADA": "Aprobó una solicitud de permiso",
+    "SOLICITUD_PERMISO_RECHAZADA": "Rechazó una solicitud de permiso",
+    "SOLICITUD_PERMISO_CANCELADA": "Canceló su solicitud de permiso",
     "DUPLICADO_ELIMINADO": "Eliminó un duplicado",
     "RESPALDO_MANUAL": "Hizo un respaldo manual",
     "RESPALDO": "Respaldo completado",
@@ -63,7 +69,31 @@ ETIQUETAS = {
     "AUDITORIA_EXPORTADA": "Descargó el Excel de auditoría",
     "LOGS_LIMPIADOS": "Limpió el historial de logs",
     "ACCESO_DENEGADO": "Intento sin permiso",
+    "CONFIG_PARAMETROS": "Cambió semana, corte o tamaño del ZIP",
+    "ANIO_CREADO": "Creó un año epidemiológico",
+    "ANIO_EDITADO": "Editó un año epidemiológico",
+    "ANIO_ACTIVADO": "Activó un año epidemiológico",
+    "ANIO_ELIMINADO": "Eliminó un año epidemiológico",
+    "ANIOS_PERMITIDOS": "Cambió los años permitidos para envío",
+    "EXCLUSION_AGREGADA": "Excluyó un centro",
+    "EXCLUSION_QUITADA": "Reincorporó un centro",
+    "EXCLUSIONES_LIMPIADAS": "Limpió las exclusiones de una red",
+    "CARPETA_DRIVE_CREADA": "Agregó una carpeta de Drive",
+    "CARPETA_DRIVE_ACTIVADA": "Activó una carpeta de Drive",
+    "CARPETA_DRIVE_ELIMINADA": "Eliminó una carpeta de Drive",
+    "NOTIFICACION_ENVIADA": "Envió recordatorios por correo",
+    "NOTIFICACION_LIMITE": "Envío de recordatorios detenido por el tope",
+    "ZIP_BLOQUEADO": "ZIP bloqueado por seguridad",
+    "SESION_INACTIVIDAD": "Sesión cerrada por inactividad",
 }
+
+
+# Acciones de configuración que pasan por src/cambios_configuracion.py (con permiso, motivo y aviso).
+CAMBIOS_DE_CONFIGURACION = (
+    "CONFIG_PARAMETROS", "ANIO_CREADO", "ANIO_EDITADO", "ANIO_ACTIVADO", "ANIO_ELIMINADO", "ANIOS_PERMITIDOS",
+    "EXCLUSION_AGREGADA", "EXCLUSION_QUITADA", "EXCLUSIONES_LIMPIADAS",
+    "CARPETA_DRIVE_CREADA", "CARPETA_DRIVE_ACTIVADA", "CARPETA_DRIVE_ELIMINADA",
+)
 
 
 class AuditoriaError(Exception):
@@ -117,6 +147,10 @@ def _categoria_de(accion: str) -> str:
     a = (accion or "").upper()
     if a.startswith(("LOGIN", "LOGOUT", "BLOQUEO", "SESION")):
         return "ACCESO"
+    if a.startswith("ZIP_"):
+        return "SEGURIDAD"
+    if a.startswith("NOTIFICACION"):
+        return "NOTIFICACIONES"
     if any(k in a for k in ("ADMIN", "PASSWORD", "USUARIO", "CUENTA", "CREDENCIAL")):
         return "CUENTAS"
     if "PERMISO" in a:
@@ -125,7 +159,7 @@ def _categoria_de(accion: str) -> str:
         return "DUPLICADOS"
     if "RESPALDO" in a:
         return "RESPALDOS"
-    if any(k in a for k in ("CONFIG", "SEMANA", "CORTE", "ANIO", "EXCLU")):
+    if any(k in a for k in ("CONFIG", "SEMANA", "CORTE", "ANIO", "EXCLU", "CARPETA")):
         return "CONFIGURACION"
     if any(k in a for k in ("RESUMEN", "CIERRE", "DESTINATARIO")):
         return "CIERRES"
@@ -147,8 +181,15 @@ def evaluar_alertas(accion: str, detalle: Optional[Dict], momento: Optional[date
             alertas.append(f"Más de {Config.ALERTA_RETIRO_MAX_ARCHIVOS} archivos")
         if detalle.get("definitivo"):
             alertas.append("Borrado definitivo")
+    if accion in CAMBIOS_DE_CONFIGURACION:
+        if detalle.get("tiene_envios"):
+            alertas.append("Año con envíos registrados")
+        if detalle.get("excepcional"):
+            alertas.append("Cambio excepcional (retroceso o salto de semana)")
+        if accion in ("ANIO_ELIMINADO", "EXCLUSIONES_LIMPIADAS"):
+            alertas.append("Acción que no se puede deshacer")
     if accion in ("RETIRO_EJECUTADO", "RETIRO_SOLICITADO", "RETIRO_APROBADO", "DESCARGA_MASIVA", "DUPLICADO_ELIMINADO",
-                  "LOGS_LIMPIADOS", "PERMISO_OTORGADO"):
+                  "LOGS_LIMPIADOS", "PERMISO_OTORGADO") or accion in CAMBIOS_DE_CONFIGURACION:
         fuera = not (Config.HORARIO_LABORAL_INICIO <= momento.hour < Config.HORARIO_LABORAL_FIN) or momento.weekday() >= 5
         if fuera:
             alertas.append("Fuera del horario laboral")
@@ -282,6 +323,19 @@ class Auditoria:
         if resultado:
             q = q.eq("resultado", resultado)
         return q.order("id", desc=True).range(offset, offset + limite - 1).execute().data or []
+
+    def correos_enviados_recientes(self, usuario: str, minutos: int = 60) -> int:
+        """Suma de correos de recordatorio enviados por una cuenta en los últimos `minutos` (para el tope por hora)."""
+        if not self.disponible():
+            return 0
+        desde = (ahora_lima() - timedelta(minutes=minutos)).strftime(FORMATO)
+        total = 0
+        for f in self.listar(desde=desde, usuario=usuario, accion="NOTIFICACION_ENVIADA", limite=200):
+            try:
+                total += int(self.detalle_de(f).get("n_ok") or 0)
+            except (TypeError, ValueError):
+                continue
+        return total
 
     @staticmethod
     def detalle_de(fila: Dict) -> Dict:

@@ -19,7 +19,8 @@ from src.data_loader import get_data_loader
 from src.password_policy import generar as generar_password_segura, validar as validar_password
 from utils.cuentas_ui import requisitos_html, explicacion_requisitos
 from utils.tema import mostrar, aviso, chip
-from utils.tema_admin import tabla_df, panel_cab, esc
+from utils.tema_admin import panel_cab, esc
+from utils.tabla_navegable import tabla_navegable_df
 from app_pages.admin_helpers import formatear_fecha_columna
 
 
@@ -183,11 +184,11 @@ def _mostrar_carga_masiva(red_auth, redes_validas: list):
 
 
 def _chip_activo(valor):
-    return chip("Activo", "ok", "check") if valor in (True, 1, "1", "true", "True") else chip("Desactivado", "mute")
+    return chip("Activo", "ok", "check") if valor in (True, 1, "1", "true", "True", "Activo") else chip("Desactivado", "mute")
 
 
 def _chip_temporal(valor):
-    return chip("Pendiente de cambio", "warn", "reloj") if valor in (True, 1, "1", "true", "True") else chip("Propia", "ok", "check")
+    return chip("Pendiente de cambio", "warn", "reloj") if valor in (True, 1, "1", "true", "True", "Pendiente de cambio") else chip("Propia", "ok", "check")
 
 
 def mostrar_gestion_credenciales_red():
@@ -226,12 +227,21 @@ def mostrar_gestion_credenciales_red():
             df = pd.DataFrame(credenciales)
             vista = pd.DataFrame({
                 'Red': df['red'],
-                'Acceso': df.get('activo', True),
-                'Contraseña': df.get('debe_cambiar_password', False),
+                'Acceso': pd.Series(df.get('activo', True), index=df.index).apply(
+                    lambda v: 'Activo' if v in (True, 1, '1', 'true', 'True') else 'Desactivado'),
+                'Contraseña': pd.Series(df.get('debe_cambiar_password', False), index=df.index).apply(
+                    lambda v: 'Pendiente de cambio' if v in (True, 1, '1', 'true', 'True') else 'Propia'),
                 'Último ingreso': df['ultimo_login'].apply(formatear_fecha_columna) if 'ultimo_login' in df.columns else '—',
                 'Actualizada': df['fecha_actualizacion'].apply(formatear_fecha_columna) if 'fecha_actualizacion' in df.columns else '—',
             })
-            mostrar(tabla_df(vista, chips={'Acceso': _chip_activo, 'Contraseña': _chip_temporal}, alto=480))
+            tabla_navegable_df(
+                "cred_red", vista, chips={'Acceso': _chip_activo, 'Contraseña': _chip_temporal},
+                filtro={"columna": "Contraseña", "opciones": ["Pendiente de cambio", "Propia"], "etiqueta": "Contraseña"},
+                filtros=[{"columna": "Acceso", "etiqueta": "Acceso"}],
+                fechas={"columna": "Último ingreso", "etiqueta": "Último ingreso"},
+                placeholder="Nombre de la red", unidad="redes", por_pagina_inicial=25,
+                descarga=("credenciales_red_estado", "Redes"),
+            )
 
     # ============================================================
     # CREAR / REGENERAR CONTRASEÑA DE UNA RED

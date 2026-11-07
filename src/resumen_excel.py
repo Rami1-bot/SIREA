@@ -197,6 +197,16 @@ def _tono_pct(p: float):
     return ROJO_BG, ROJO_FG
 
 
+def pie_impresion(ws):
+    """Papel A4 horizontal y pie con la institución y el número de página (todos los Excel del SIREA)."""
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_margins.left = ws.page_margins.right = 0.4
+    ws.oddFooter.left.text = "SIREA · EsSalud OIIS"
+    ws.oddFooter.left.size = 8
+    ws.oddFooter.right.text = "Página &P de &N"
+    ws.oddFooter.right.size = 8
+
+
 def generar_excel(datos: Dict) -> bytes:
     """Dibuja el Excel corporativo a partir de `recolectar()`."""
     wb = Workbook()
@@ -306,6 +316,7 @@ def generar_excel(datos: Dict) -> bytes:
     ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.print_options.horizontalCentered = True
+    pie_impresion(ws)
 
     salida = io.BytesIO()
     wb.save(salida)

@@ -20,6 +20,8 @@ from src.solicitudes_password import fecha_lima
 from utils.tema import aviso, chip, kpi, mostrar
 from utils.tema_admin import esc, panel_cab, tabla_df
 from app_pages.admin_helpers import actor_actual
+from app_pages.solicitar_permiso import chip_solicitud
+from src.solicitudes_permiso import get_solicitudes_permiso
 
 
 def _es_principal(token) -> bool:
@@ -45,6 +47,63 @@ def _estado_permiso(f) -> str:
         except Exception:
             pass
     return chip("Vigente", "ok", "check")
+
+
+def _panel_solicitudes(token):
+    """Solicitudes de permiso: el principal las aprueba (eligiendo redes y vigencia) o las rechaza."""
+    sol = get_solicitudes_permiso()
+    with st.container(key="panel_perm_solicitudes"):
+        panel_cab("Solicitudes de permiso", "Lo que piden las demás cuentas desde «Solicitar acceso»")
+        if not sol.disponible():
+            mostrar(aviso("info", "Las solicitudes llegan solo por correo",
+                          "Para verlas y responderlas aquí, ejecute <strong>sql/17_solicitudes_permiso.sql</strong> en el SQL Editor de Supabase."))
+            return
+        todas = sol.listar(limite=200)
+        pend = [s for s in todas if s["estado"] == "PENDIENTE"]
+        if not pend:
+            mostrar('<div class="sire-vacio">No hay solicitudes pendientes.</div>')
+        else:
+            mostrar(aviso("warn", f"{len(pend)} solicitud(es) esperan su respuesta", "Nadie recibe el permiso hasta que usted lo apruebe."))
+        for s in pend:
+            nombre_perm = PERMISOS.get(s["permiso"], (s["permiso"],))[0]
+            with st.container(border=True, key=f"sol_perm_{s['id']}"):
+                st.markdown(f"**{s.get('nombre') or s['usuario']}** (`{s['usuario']}`) pide **{nombre_perm}** · {fecha_lima(s.get('creada_en'))}")
+                st.write(s.get("mensaje") or "")
+                redes_sel, fecha = [], None
+                c1, c2 = st.columns([1.6, 1.4])
+                with c1:
+                    if s["permiso"] in ("DESCARGA_MASIVA", "RETIRO_REPOSITORIO"):
+                        redes_sel = st.multiselect("Redes a las que aplica (vacío = todas)", _redes(), key=f"sol_redes_{s['id']}")
+                with c2:
+                    vig = st.radio("Vigencia", ["Sin vencimiento", "Hasta una fecha"], key=f"sol_vig_{s['id']}", horizontal=True)
+                    if vig == "Hasta una fecha":
+                        fecha = st.date_input("Vence el (hasta las 23:59, hora de Lima)", value=(datetime.now(LIMA) + timedelta(days=7)).date(),
+                                              min_value=datetime.now(LIMA).date(), key=f"sol_fecha_{s['id']}")
+                resp = st.text_input("Respuesta para la persona (opcional)", key=f"sol_resp_{s['id']}", max_chars=300)
+                b1, b2, _ = st.columns([1, 1, 3])
+                with b1:
+                    aprobar = st.button("Aprobar", type="primary", icon=":material/check:", key=f"sol_ok_{s['id']}", use_container_width=True)
+                with b2:
+                    rechazar = st.button("Rechazar", icon=":material/close:", key=f"sol_no_{s['id']}", use_container_width=True)
+                if aprobar or rechazar:
+                    if aprobar:
+                        vence_en = datetime.combine(fecha, time(23, 59, 59)) if fecha else None
+                        ok, msg = sol.aprobar(token, s["id"], redes_sel or None, vence_en, resp)
+                    else:
+                        ok, msg = sol.rechazar(token, s["id"], resp)
+                    st.session_state["perm_resultado"] = ("ok" if ok else "bad", msg)
+                    st.rerun()
+        hist = [s for s in todas if s["estado"] != "PENDIENTE"]
+        if hist:
+            with st.expander(f"Historial de solicitudes ({len(hist)})"):
+                df = pd.DataFrame({
+                    "Persona": [s["usuario"] for s in hist],
+                    "Permiso": [PERMISOS.get(s["permiso"], (s["permiso"],))[0] for s in hist],
+                    "Estado": [chip_solicitud(s["estado"]) for s in hist],
+                    "Enviada": [fecha_lima(s.get("creada_en")) for s in hist],
+                    "Respondió": [f"{s.get('resuelta_por') or '—'} · {fecha_lima(s.get('resuelta_en'))}" if s.get("resuelta_por") else "—" for s in hist],
+                    "Respuesta": [s.get("respuesta") or "—" for s in hist]})
+                mostrar(tabla_df(df, crudas=("Estado",), alto=320))
 
 
 def mostrar_permisos_operacion():
@@ -80,6 +139,8 @@ def mostrar_permisos_operacion():
                   "Nadie, salvo usted, tiene estos permisos por defecto: ni siquiera otro SUPER_ADMIN. "
                   "Cada asignación y cada uso quedan en el «Control de actividad» y se avisa por correo."))
 
+    _panel_solicitudes(token)
+
     with st.container(key="panel_perm_dar"):
         panel_cab("Asignar permisos", "Elija a la persona, qué puede hacer y hasta cuándo")
         if not cuentas:
@@ -96,7 +157,7 @@ def mostrar_permisos_operacion():
             c3, c4 = st.columns([1.8, 1.2])
             with c3:
                 redes_ok = st.multiselect("Redes a las que aplica (vacío = todas)", _redes(), key="perm_redes",
-                                          help="Limita la descarga y el retiro a esas redes. No afecta a «Ver auditoría» ni a «Respaldo manual».")
+                                          help="Limita la descarga y el retiro a esas redes. No afecta a «Ver auditoría», «Respaldo manual» ni «Cambiar la configuración».")
             with c4:
                 vence = st.radio("Vigencia", ["Sin vencimiento", "Hasta una fecha"], key="perm_vig")
             fecha = None
