@@ -87,6 +87,21 @@ def chip_nivel(pct) -> str:
     return chip("Bajo", "bad", "alerta")
 
 
+def nivel_de(pct) -> str:
+    """Completo / Parcial / Bajo según el porcentaje (para filtrar y exportar)."""
+    try:
+        p = float(str(pct).replace("%", "").strip())
+    except (TypeError, ValueError):
+        return "—"
+    return "Completo" if p >= 100 else ("Parcial" if p >= 50 else "Bajo")
+
+
+def chip_nivel_texto(texto) -> str:
+    """Chip de un nivel ya escrito (Completo / Parcial / Bajo)."""
+    return {"Completo": chip("Completo", "ok", "check"), "Parcial": chip("Parcial", "warn", "reloj"),
+            "Bajo": chip("Bajo", "bad", "alerta")}.get(str(texto), chip("—", "mute"))
+
+
 # ============================================================
 # TABLAS
 # ============================================================
@@ -99,9 +114,12 @@ def tabla_html(
     derecha: Sequence[str] = (),
     vacio: str = "Sin registros para mostrar.",
     alto: Optional[int] = None,
+    variante: str = "",
 ) -> str:
     """
     Tabla HTML con el estilo del panel.
+
+    - variante: clases extra del contenedor (por ejemplo "sire-tabla-azul" para el encabezado azul claro).
 
     - chips: {columna: funcion(valor) -> html} para columnas con etiqueta.
     - crudas: columnas cuyo contenido ya es HTML confiable.
@@ -129,7 +147,7 @@ def tabla_html(
         return f'<div class="sire-vacio">{esc(vacio)}</div>'
     estilo = f' style="max-height:{int(alto)}px;overflow-y:auto"' if alto else ""
     return (
-        f'<div class="sire-tabla-wrap"{estilo}><table class="sire-tabla"><thead><tr>'
+        f'<div class="sire-tabla-wrap {esc(variante)}"{estilo}><table class="sire-tabla"><thead><tr>'
         + cab + "</tr></thead><tbody>" + "".join(cuerpo) + "</tbody></table></div>"
     )
 
@@ -154,7 +172,7 @@ def barras_h(items: List[Tuple[str, float]], tono: str = "info", sufijo: str = "
     if not items:
         return '<div class="sire-vacio">Sin datos para mostrar.</div>'
     maximo = max((float(v) for _, v in items), default=1) or 1
-    color = {"info": "#0077C8", "bad": "#B42318", "ok": "#1E6B3A", "warn": "#7A5A00"}[tono]
+    color = {"info": "#0077C8", "bad": "#B42318", "ok": "#1E6B3A", "warn": "#96500A"}[tono]
     filas = "".join(
         f'<div class="sire-hb"><span class="sire-hb-k">{esc(k)}</span>'
         f'<span class="sire-hb-pista"><span style="width:{max(2, float(v) / maximo * 100):.1f}%;background:{color}"></span></span>'
@@ -222,8 +240,21 @@ def encabezado_admin(titulo: str, subtitulo: str = "", grupo: str = ""):
     mostrar(
         '<div class="sire-admin-top"><div class="sire-titulo"><div>'
         f'<div class="sire-migas">{migas}</div><h1>{esc(titulo)}</h1>{s}</div>'
-        f'<div class="sire-titulo-der">{etiquetas}</div></div></div>'
+        f'<div class="sire-titulo-der">{etiquetas}</div></div>{_cuerda(semana, anio)}</div>'
     )
+
+
+def _cuerda(semana, anio) -> str:
+    """SIREA 3.5: la cuerda de semanas del año (quipu) bajo el título de cada sección."""
+    if not semana:
+        return ""
+    try:
+        from src.db_manager import get_db_manager
+        total = int(get_db_manager().obtener_semanas_por_anio(anio) or 52)
+    except Exception:
+        total = 52
+    from utils.tema import quipu_semanas
+    return f'<div class="sirea-quipu-admin">{quipu_semanas(semana, total, anio, oscuro=False, ancho=1600, alto=84)}</div>'
 
 
 def kpis(tarjetas: List[str]):
@@ -234,11 +265,11 @@ def kpis(tarjetas: List[str]):
             mostrar(html)
 
 
-def descargas(df, nombre_base: str, hoja: str = "Datos", key: str = "dl"):
-    """Dos botones de descarga (CSV y Excel) para un DataFrame, uno junto al otro."""
+def descargas(df, nombre_base: str, hoja: str = "Datos", key: str = "dl", titulo: str = None):
+    """Dos botones de descarga (CSV y Excel corporativo) para un DataFrame, uno junto al otro."""
     import io
     st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
-    c1, c2, _ = st.columns([1, 1, 2.2])
+    c1, c2 = st.columns(2)
     with c1:
         st.download_button(
             "Descargar CSV", data=df.to_csv(index=False).encode("utf-8-sig"),
@@ -247,12 +278,9 @@ def descargas(df, nombre_base: str, hoja: str = "Datos", key: str = "dl"):
         )
     with c2:
         try:
-            salida = io.BytesIO()
-            import pandas as pd
-            with pd.ExcelWriter(salida, engine="openpyxl") as w:
-                df.to_excel(w, index=False, sheet_name=hoja[:31])
+            from src.excel_corporativo import generar_excel_df
             st.download_button(
-                "Descargar Excel", data=salida.getvalue(),
+                "Descargar Excel", data=generar_excel_df(df, hoja=hoja, titulo=titulo or hoja),
                 file_name=f"{nombre_base}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 icon=":material/download:", key=f"{key}_xlsx", use_container_width=True,

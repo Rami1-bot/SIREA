@@ -25,7 +25,7 @@ from utils.helpers import (
     sanitizar_dict_html
 )
 from utils.tema import (
-    aplicar_tema, encabezado_publico, pie_pagina, mostrar, mostrar_aviso,
+    aplicar_tema, encabezado_publico, pie_pagina, mostrar, mostrar_aviso, css_banda,
     marca_svg, chip, icono, logo_uri, aviso,
 )
 from utils.tema_admin import encabezado_admin, esc
@@ -54,6 +54,7 @@ from app_pages.admin_credenciales_red import mostrar_gestion_credenciales_red
 from app_pages.admin_drive import mostrar_gestion_drive
 from app_pages.admin_historial import mostrar_historial
 from app_pages.admin_repositorio import mostrar_descarga_limpieza, pendientes_retiro
+from src.solicitudes_permiso import pendientes_permisos
 from app_pages.admin_permisos import mostrar_permisos_operacion
 from app_pages.admin_actividad import mostrar_control_actividad, puede_ver as puede_ver_actividad
 
@@ -127,6 +128,9 @@ SECCIONES = {
     'Permisos de Operacion': (
         'Permisos de operación', ':material/key:',
         'Permisos de operación', 'Quién puede descargar en masa, retirar archivos, respaldar y ver la auditoría (solo oiis.winepi).'),
+    'Salud del Sistema': (
+        'Salud del sistema', ':material/health_and_safety:',
+        'Salud del sistema', 'Configuración, base de datos, Drive, correo, IA y seguridad: todo revisado desde aquí, sin consola.'),
     'Agente de IA': (
         'Agente de IA', ':material/auto_awesome:',
         'Agente de IA', 'Lo que la IA preparó para usted: pendientes, recordatorios por aprobar, patrones de las redes e informe semanal.'),
@@ -140,7 +144,7 @@ GRUPOS_NAV = [
     ('Gestión de envíos', ['Control de Atrasos', 'Control de Duplicados', 'Observaciones', 'Informe por Semana', 'Descarga y Limpieza', 'Notificaciones']),
     ('Administración', ['Exclusion de Centros', 'Configuracion', 'Gestion de Drive', 'Respaldos']),
     ('Solo SUPER_ADMIN', ['Gestion de Administradores', 'Solicitudes de Contraseña', 'Cuentas del Panel', 'Credenciales de Red', 'Historial y Logs']),
-    ('Trazabilidad', ['Control de Actividad', 'Permisos de Operacion']),
+    ('Trazabilidad', ['Control de Actividad', 'Permisos de Operacion', 'Salud del Sistema']),
     ('Inteligencia artificial', ['Agente de IA', 'Gobernanza de IA']),
 ]
 
@@ -148,7 +152,8 @@ GRUPOS_NAV = [
 # credenciales de red ni ve el historial/logs del sistema: esas
 # secciones ni siquiera aparecen en su menú (además cada página ya se
 # protege por su cuenta si se llegara a acceder de otra forma).
-SECCIONES_SOLO_SUPER_ADMIN = ['Gestion de Administradores', 'Solicitudes de Contraseña', 'Cuentas del Panel', 'Credenciales de Red', 'Historial y Logs']
+SECCIONES_SOLO_SUPER_ADMIN = ['Gestion de Administradores', 'Solicitudes de Contraseña', 'Cuentas del Panel', 'Credenciales de Red', 'Historial y Logs',
+                              'Salud del Sistema']
 
 # «Cuentas del panel» la ve únicamente el SUPER_ADMIN principal (oiis.winepi).
 SECCIONES_SOLO_PRINCIPAL = ['Cuentas del Panel', 'Permisos de Operacion']
@@ -266,69 +271,68 @@ def mostrar_login():
     aplicar_tema()
     if st.session_state.pop("_borrar_cookie", False):
         _borrar_sesion_del_navegador()
-    encabezado_publico("admin", nav=False)
+    st.markdown(css_banda(), unsafe_allow_html=True)
+    with st.container(key="sire_banda"):
+        encabezado_publico("admin", nav=False)
+        with st.container(key="sire_login"):
+          izq, der = st.columns([1.15, 1], gap="large", vertical_alignment="center")
 
-    with st.container(key="sire_split_oscuro"):
-        izq, der = st.columns(2, gap="small")
-
-        with izq:
+          with izq:
             mostrar(f"""
-            <img src="{logo_uri('essalud-blanco.png')}" alt="EsSalud" class="sire-split-logo">
-            <div class="sire-split-in">
-              <span class="sire-pildora">{icono('candado', 15, 'currentColor', 2.4)}Solo personal autorizado</span>
-              <h1>Panel de administración OIIS</h1>
-              <p>Seguimiento de los reportes epidemiológicos de las redes asistenciales, control de envíos y gestión de cuentas.</p>
-              <div style="display:flex;flex-direction:column;gap:12px;margin-top:6px">
-                <div class="sire-ck">{icono('check', 20, '#FFFFFF', 2.6)}<span>Cada acción queda registrada en el historial.</span></div>
-                <div class="sire-ck">{icono('check', 20, '#FFFFFF', 2.6)}<span>Tras 5 intentos fallidos, el acceso se bloquea 5 minutos.</span></div>
-                <div class="sire-ck">{icono('check', 20, '#FFFFFF', 2.6)}<span>La sesión caduca a las 8 horas.</span></div>
-              </div>
+            <div class="sire-login-txt">
+              <span class="sire-hero-chip"><i></i>Solo personal autorizado</span>
+              <h1 class="sire-bp-h1">Panel de administración OIIS</h1>
+              <p class="sire-bp-p">Seguimiento de los reportes epidemiológicos de las redes asistenciales, control de envíos y gestión de cuentas.</p>
+              <ol class="sire-login-pasos sire-login-checks">
+                <li><b>{icono('check', 16, '#FFFFFF', 2.8)}</b><span>Cada acción queda registrada en el historial.</span></li>
+                <li><b>{icono('candado', 16, '#FFFFFF', 2.4)}</b><span>Tras 5 intentos fallidos, el acceso se bloquea 5 minutos.</span></li>
+                <li><b>{icono('reloj', 16, '#FFFFFF', 2.4)}</b><span>La sesión caduca a las 8 horas.</span></li>
+              </ol>
             </div>
-            <div class="sire-split-pie">EsSalud · Oficina de Inteligencia e Información Sanitaria</div>
             """)
 
-        with der:
-            if st.session_state.pop('cambio_password_ok', False):
-                mostrar(aviso("ok", "Contraseña actualizada", "Ingrese con su nueva contraseña."))
-            with st.form("login_form", clear_on_submit=False):
-                mostrar("""
-                <h2 class="sire-form-t">Iniciar sesión</h2>
-                <p class="sire-form-s">Ingrese con su usuario y contraseña del panel.</p>
-                """)
-                usuario = st.text_input("Usuario", placeholder="Ingrese su usuario")
-                password = st.text_input("Contraseña", type="password", placeholder="Ingrese su contraseña")
+          with der:
+              if st.session_state.pop('cambio_password_ok', False):
+                  mostrar(aviso("ok", "Contraseña actualizada", "Ingrese con su nueva contraseña."))
+              with st.form("login_form", clear_on_submit=False):
+                  mostrar("""
+                  <h2 class="sire-form-t">Iniciar sesión</h2>
+                  <p class="sire-form-s">Ingrese con su usuario y contraseña del panel.</p>
+                  """)
+                  usuario = st.text_input("Usuario", placeholder="Ingrese su usuario")
+                  password = st.text_input("Contraseña", type="password", placeholder="Ingrese su contraseña")
 
-                submit = st.form_submit_button("Entrar al panel", width='stretch', type="primary")
+                  submit = st.form_submit_button("Entrar al panel", width='stretch', type="primary")
 
-                mostrar(f"""
-                <div class="sire-form-nota">{icono('candado', 18, '#0077C8', 2.2)}
-                <span>Si olvidó su contraseña, solicite a un SUPER_ADMIN que la restablezca.</span></div>
-                """)
+                  mostrar(f"""
+                  <div class="sire-form-nota">{icono('candado', 18, '#0077C8', 2.2)}
+                  <span>Si olvidó su contraseña, solicite a un SUPER_ADMIN que la restablezca.</span></div>
+                  """)
 
-                if submit:
-                    if usuario and password:
-                        auth_manager = get_auth_manager()
-                        resultado = auth_manager.login(usuario, password)
+                  if submit:
+                      if usuario and password:
+                          auth_manager = get_auth_manager()
+                          resultado = auth_manager.login(usuario, password)
 
-                        if resultado['exito']:
-                            st.session_state.admin_token = resultado['token']
-                            st.session_state.admin_usuario = {k: v for k, v in (resultado['usuario'] or {}).items()
-                                                              if k != 'password_hash'}
-                            st.session_state.admin_logueado = True
-                            st.session_state["_sesion_cerrada_a_mano"] = False
-                            st.rerun()
-                        else:
-                            st.error(resultado['mensaje'])
-                    else:
-                        st.warning("Ingrese su usuario y su contraseña.")
+                          if resultado['exito']:
+                              st.session_state.admin_token = resultado['token']
+                              st.session_state.admin_usuario = {k: v for k, v in (resultado['usuario'] or {}).items()
+                                                                if k != 'password_hash'}
+                              st.session_state.admin_logueado = True
+                              st.session_state["_sesion_cerrada_a_mano"] = False
+                              st.rerun()
+                          else:
+                              st.error(resultado['mensaje'])
+                      else:
+                          st.warning("Ingrese su usuario y su contraseña.")
 
-            mostrar('<div class="sire-pie-form">¿Es una red asistencial?</div>')
-            if st.button("Ir al portal de redes", key="link_ir_red"):
-                st.session_state.pagina = 'red_progreso'
-                st.rerun()
-            if st.button("Volver al inicio", key="link_volver_inicio"):
-                st.session_state.pagina = 'landing'
-                st.rerun()
+              mostrar('<div class="sire-pie-form">¿Es una red asistencial?</div>')
+              if st.button("Ir al portal de redes", key="link_ir_red"):
+                  st.session_state.pagina = 'red_progreso'
+                  st.rerun()
+              if st.button("Volver al inicio", key="link_volver_inicio"):
+                  st.session_state.pagina = 'landing'
+                  st.rerun()
 
     pie_pagina(margen=0)
 
@@ -359,14 +363,15 @@ def _menu_lateral(usuario_actual: dict, es_super_admin: bool, es_principal: bool
     # Aviso de solicitudes de contraseña pendientes (lo ve todo SUPER_ADMIN).
     n_solicitudes = pendientes_para_aviso() if es_super_admin else 0
     n_retiros = pendientes_retiro() if es_principal else 0
+    n_permisos = pendientes_permisos() if es_principal else 0
     cont_obs = contadores_observaciones()
     n_obs, n_fallas = cont_obs['normales'], cont_obs['fallas']
     marcas = avisos_menu()
 
     with st.sidebar:
         mostrar(f"""
-        <div class="sire-side-brand">{marca_svg(42, invertida=True)}
-          <div><b>SIRE<span style="color:#D9C7F2">A</span></b><small>Panel OIIS</small></div></div>
+        <div class="sire-side-brand">{marca_svg(42)}
+          <div><b>SIRE<span class="sire-a">A</span></b><small>Panel OIIS</small></div></div>
         """)
 
         for grupo, claves in GRUPOS_NAV:
@@ -387,6 +392,8 @@ def _menu_lateral(usuario_actual: dict, es_super_admin: bool, es_principal: bool
                     etiqueta = f"{etiqueta} !" if n_fallas else etiqueta
                 if clave == 'Descarga y Limpieza' and n_retiros:
                     etiqueta = f"{etiqueta} ({n_retiros})"
+                if clave == 'Permisos de Operacion' and n_permisos:
+                    etiqueta = f"{etiqueta} ({n_permisos})"
                 st.button(
                     etiqueta,
                     key=f"nav_{clave}",
@@ -465,6 +472,20 @@ def mostrar_dashboard():
                 st.button("Revisar ahora", key="btn_ir_retiros", type="primary", use_container_width=True,
                           icon=":material/arrow_forward:", on_click=_ir_a_seccion, args=('Descarga y Limpieza',))
 
+    # Solicitudes de permiso esperando la respuesta de oiis.winepi.
+    if es_principal and seccion != 'Permisos de Operacion':
+        n_perm = pendientes_permisos()
+        if n_perm:
+            col_av, col_bt = st.columns([5, 1.3], vertical_alignment="center")
+            with col_av:
+                mostrar(aviso(
+                    "warn",
+                    f"{n_perm} solicitudes de permiso esperan su respuesta" if n_perm != 1 else "Una solicitud de permiso espera su respuesta",
+                    "Nadie recibe el permiso hasta que usted lo apruebe."))
+            with col_bt:
+                st.button("Revisar ahora", key="btn_ir_permisos", type="primary", use_container_width=True,
+                          icon=":material/arrow_forward:", on_click=_ir_a_seccion, args=('Permisos de Operacion',))
+
     # Semana propuesta por el sistema al cerrar el corte: falta validarla (o ya la validó alguien).
     if seccion != 'Configuracion':
         banners_panel(lambda: _ir_a_seccion('Configuracion'))
@@ -535,6 +556,9 @@ def _mostrar_seccion(seccion: str):
     elif seccion == "Gobernanza de IA":
         from app_pages.admin_agentes_ia import mostrar_gobernanza_ia
         mostrar_gobernanza_ia()
+    elif seccion == "Salud del Sistema":
+        from app_pages.admin_salud import mostrar_salud
+        mostrar_salud()
 
 def main():
     """Funcion principal de la pagina."""

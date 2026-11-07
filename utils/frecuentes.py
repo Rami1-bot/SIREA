@@ -66,11 +66,11 @@ def panel(lista: List[Dict]):
 
     with st.container(key="sire_frecuentes"):
         mostrar('<div class="sire-frec-t">Usuarios frecuentes en este equipo</div>'
-                '<div class="sire-frec-s">Haga clic en una persona para completar sus apellidos, nombres y correo. '
+                '<div class="sire-frec-s">Haga clic en una persona para completar sus nombres, apellidos y correo. '
                 'Los datos se guardan solo en este navegador.</div>')
         for i, u in enumerate(lista[:6]):
             c1, c2 = st.columns([12, 1], vertical_alignment="center")
-            nombre = f"{u.get('apellidos', '')} {u.get('nombres', '')}".strip() or "Sin nombre"
+            nombre = f"{u.get('nombres', '')} {u.get('apellidos', '')}".strip() or "Sin nombre"
             with c1:
                 st.button(f"{nombre} · {u.get('correo', '')}", key=f"frec_usar_{i}", use_container_width=True,
                           icon=":material/person:", on_click=_usar, args=(u,))

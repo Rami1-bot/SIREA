@@ -18,8 +18,11 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-SECRETOS = ("SUPABASE_KEY", "EMAIL_PASSWORD", "DB_PASSWORD")
+SECRETOS = ("SUPABASE_KEY", "EMAIL_PASSWORD", "DB_PASSWORD", "GEMINI_API_KEY", "GROQ_API_KEY")
 resultados = {"OK": 0, "AVISO": 0, "FALLA": 0}
+# SIREA 3.5: además de imprimir, cada resultado queda en `registro` para la pantalla «Salud del sistema».
+registro = []
+_estado = {"seccion": "", "imprimir": True}
 
 
 def limpiar(texto) -> str:
@@ -33,13 +36,23 @@ def limpiar(texto) -> str:
 
 
 def mostrar(nivel: str, titulo: str, detalle: str = ""):
-    resultados[nivel] += 1
-    marca = {"OK": "[ OK  ]", "AVISO": "[AVISO]", "FALLA": "[FALLA]"}[nivel]
-    print(f"{marca} {titulo}" + (f"\n         {limpiar(detalle)}" if detalle else ""))
+    if nivel in resultados:
+        resultados[nivel] += 1
+    registro.append({"seccion": _estado["seccion"], "nivel": nivel, "titulo": limpiar(titulo), "detalle": limpiar(detalle) if detalle else ""})
+    if _estado["imprimir"]:
+        marca = {"OK": "[ OK  ]", "AVISO": "[AVISO]", "FALLA": "[FALLA]", "INFO": "[ i   ]"}[nivel]
+        print(f"{marca} {titulo}" + (f"\n         {limpiar(detalle)}" if detalle else ""))
+
+
+def nota(texto: str):
+    """Dato informativo (no cuenta como OK, aviso ni falla)."""
+    mostrar("INFO", texto)
 
 
 def seccion(nombre: str):
-    print(f"\n=== {nombre} ===")
+    _estado["seccion"] = nombre
+    if _estado["imprimir"]:
+        print(f"\n=== {nombre} ===")
 
 
 PLACEHOLDERS = ("completar", "xxxx", "tu-", "tu_", "example", "ejemplo", "nombre-o-ip", "pegue", "cambiar")
@@ -50,8 +63,45 @@ def es_placeholder(v: str) -> bool:
     return (not b) or any(p in b for p in PLACEHOLDERS)
 
 
+def revisar_fuente_secretos():
+    """SIREA 3.5: de dónde salen los secretos (secrets.toml, .env o variables del sistema)."""
+    from src.config import Config
+    from src import secretos
+    est = secretos.estado(Config.BASE_DIR)
+    if est["secrets_toml"]:
+        mostrar("OK", "Secretos en .streamlit/secrets.toml", "Fuente principal de la configuración.")
+        if est["env"]:
+            mostrar("AVISO", "También existe un .env",
+                    "Queda como respaldo (no pisa a secrets.toml). Si todo funciona, puede borrarlo para tener una sola fuente.")
+    elif est["env"]:
+        mostrar("AVISO", "Se usa el .env heredado", "Recomendado: python scripts/env_a_secrets.py --archivo para pasar a .streamlit/secrets.toml.")
+    elif os.getenv("SUPABASE_URL"):
+        mostrar("OK", "Secretos en variables del sistema", "Por ejemplo, Streamlit Cloud o GitHub Actions.")
+    else:
+        mostrar("FALLA", "No se encontró configuración", "Copie .streamlit/secrets.toml.example como .streamlit/secrets.toml y complételo.")
+
+
+def rol_clave_supabase(clave: str) -> str:
+    """'service_role' | 'anon' | 'secret' | 'publishable' | '' según la forma de la clave (no la valida contra el servidor)."""
+    import base64
+    c = (clave or "").strip()
+    if c.startswith("sb_secret_"):
+        return "secret"
+    if c.startswith("sb_publishable_"):
+        return "publishable"
+    partes = c.split(".")
+    if len(partes) == 3:
+        try:
+            carga = partes[1] + "=" * (-len(partes[1]) % 4)
+            return str(json.loads(base64.urlsafe_b64decode(carga)).get("role") or "")
+        except Exception:
+            return ""
+    return ""
+
+
 def revisar_variables():
-    seccion("1. Variables del .env")
+    seccion("1. Variables de configuración")
+    revisar_fuente_secretos()
     obligatorias = {
         "SUPABASE_URL": "dirección del proyecto Supabase",
         "SUPABASE_KEY": "clave de Supabase",
@@ -70,6 +120,12 @@ def revisar_variables():
             mostrar("FALLA", f"{k} parece un valor de ejemplo", f"Reemplace el marcador por {desc}.")
         else:
             mostrar("OK", f"{k} definida")
+    rol = rol_clave_supabase(os.getenv("SUPABASE_KEY", ""))
+    if rol in ("anon", "publishable"):
+        mostrar("FALLA", "SUPABASE_KEY es la clave PÚBLICA (anon/publishable)",
+                "SIREA necesita la clave de servidor (service_role o sb_secret_…). Con la pública y RLS activo no verá los datos.")
+    elif rol in ("service_role", "secret"):
+        mostrar("OK", "SUPABASE_KEY es una clave de servidor")
     recomendadas = {
         "GOOGLE_DRIVE_FOLDER_BACKUPS_ID": "carpeta de respaldos en Drive",
         "GOOGLE_DRIVE_FOLDER_DUPLICADOS_ID": "carpeta de duplicados en Drive (si no, se usa una subcarpeta)",
@@ -94,7 +150,10 @@ def revisar_entorno():
     else:
         mostrar("OK", "Sin modo local de emergencia (STORAGE_FALLBACK_LOCAL=false)")
     uid_pid1 = None
+    en_contenedor = Path("/.dockerenv").exists()
     try:
+        if not en_contenedor:
+            raise FileNotFoundError
         for linea in Path("/proc/1/status").read_text().splitlines():
             if linea.startswith("Uid:"):
                 uid_pid1 = int(linea.split()[1])
@@ -105,7 +164,7 @@ def revisar_entorno():
             mostrar("FALLA", "El proceso principal del contenedor corre como root", "Debe correr sin privilegios (revise docker-entrypoint.sh).")
         else:
             mostrar("OK", f"El proceso principal corre sin privilegios (uid {uid_pid1})")
-    if hasattr(os, "getuid") and os.getuid() == 0:
+    if en_contenedor and hasattr(os, "getuid") and os.getuid() == 0:
         mostrar("AVISO", "Esta verificación se ejecuta como root",
                 "Use «docker compose exec -u sire app python verificar_despliegue.py»: como root se leería la credencial aunque la aplicación no pudiera.")
     proxy = os.getenv("PROXY_CONFIABLE", "false").strip().lower() in ("1", "true", "si", "sí", "yes")
@@ -131,9 +190,11 @@ def revisar_entorno():
         except Exception as e:
             mostrar("FALLA", f"No se puede escribir en {d}", f"{type(e).__name__}: {e}")
     # El .env o sus copias no deben estar dentro de la imagen
-    sospechosos = [p.name for p in Config.BASE_DIR.glob(".env*") if p.name != ".env.example"]
+    sospechosos = [p.name for p in Config.BASE_DIR.glob(".env*") if p.name not in (".env.example", ".env")]
+    if Path("/.dockerenv").exists() and (Config.BASE_DIR / ".env").exists():
+        sospechosos.insert(0, ".env")
     if sospechosos:
-        mostrar("FALLA", "Hay archivos .env* dentro de la aplicación", ", ".join(sospechosos) + " (revise .dockerignore).")
+        mostrar("FALLA", "Hay copias del .env dentro de la aplicación", ", ".join(sospechosos) + " (revise .dockerignore).")
     else:
         mostrar("OK", "No hay copias del .env dentro de la aplicación")
 
@@ -158,7 +219,7 @@ def revisar_credencial_drive():
         mostrar("FALLA", "El JSON no es de una cuenta de servicio completa", f"Campos que faltan: {', '.join(faltan) or 'type'}")
         return None
     mostrar("OK", "Credencial legible y con formato de cuenta de servicio")
-    print(f"         Cuenta de servicio: {datos['client_email']}  (las carpetas de Drive deben estar compartidas con este correo)")
+    nota(f"Cuenta de servicio: {datos['client_email']} (las carpetas de Drive deben estar compartidas con este correo)")
     return datos
 
 
@@ -174,7 +235,15 @@ def revisar_supabase():
         db.supabase.table("administradores").select("*").limit(1).execute()
         mostrar("OK", "Conexión con Supabase y clave aceptadas")
     except Exception as e:
-        mostrar("FALLA", "Supabase rechazó la conexión o la clave", f"{type(e).__name__}: {e}")
+        from src.conexion_supabase import es_error_de_conexion, diagnostico_conexion
+        if es_error_de_conexion(e):
+            mostrar("FALLA", "No se llega al servidor de Supabase",
+                    (diagnostico_conexion(cada_segundos=0) or f"{type(e).__name__}: {e}") +
+                    " Causa más común: el proyecto se PAUSÓ por inactividad (plan gratuito). Reactívelo en "
+                    "supabase.com → su proyecto → «Resume project» y active el robot de actividad "
+                    "(docs/MANTENER_ACTIVO.md).")
+        else:
+            mostrar("FALLA", "Supabase rechazó la conexión o la clave", f"{type(e).__name__}: {e}")
         return
     tablas = {
         "administradores": True, "envios": True, "configuracion": True, "anios_epidemiologicos": True,
@@ -190,6 +259,7 @@ def revisar_supabase():
         "agente_memoria_red": True, "agente_evals": True,
         "agente_skill_versiones": True,                          # SIREA 3.1: migración 53
         "agente_atrasos_justificados": True, "agente_informes": True,   # SIREA 3.2: migración 54
+        "responsables_red": True, "solicitudes_permiso": True,         # SIREA 3.4 (SIRE v7.4/v7.6): 15 y 17
     }
     migraciones = {"solicitudes_password": "09", "cierres_corte": "10", "respaldos": "10",
                    "auditoria_acciones": "11", "permisos_operaciones": "11", "descargas_masivas": "11",
@@ -197,7 +267,8 @@ def revisar_supabase():
                    "sesiones_app": "51", "intentos_login": "51", "observaciones_envio": "13",
                    "agente_corridas": "52", "agente_traza": "52", "agente_acciones": "52",
                    "agente_memoria_red": "52", "agente_evals": "52", "agente_skill_versiones": "53",
-                   "agente_atrasos_justificados": "54", "agente_informes": "54"}
+                   "agente_atrasos_justificados": "54", "agente_informes": "54",
+                   "responsables_red": "15", "solicitudes_permiso": "17"}
     for t in tablas:
         try:
             db.supabase.table(t).select("*").limit(1).execute()
@@ -205,6 +276,11 @@ def revisar_supabase():
             mig = migraciones.get(t)
             if t in ("redes",):          # opcional: el respaldo y la app funcionan sin ella
                 mostrar("AVISO", f"La tabla opcional «{t}» no existe", "No es obligatoria.")
+                continue
+            if t in ("responsables_red", "solicitudes_permiso"):   # sin ellas la app funciona con menos
+                mostrar("AVISO", f"Falta la tabla «{t}»",
+                        f"Ejecute sql/{migraciones[t]}_*.sql: sin ella no se guardan responsables de red o "
+                        "las solicitudes de permiso llegan solo por correo.")
                 continue
             if t in ("sesiones_app", "intentos_login"):   # sin ellas el bloqueo de login queda solo en memoria
                 mostrar("AVISO", f"Falta la tabla «{t}»",
@@ -229,7 +305,7 @@ def revisar_supabase():
         else:
             mostrar("OK", f"Administrador principal «{principal}» activo")
         mostrar("OK", f"Administradores activos: {len(activos)} de {len(admins)}")
-        print("         Revise que no queden cuentas de prueba activas: " + ", ".join(sorted((a.get('usuario') or '?') for a in activos)))
+        nota("Cuentas activas (revise que no queden cuentas de prueba): " + ", ".join(sorted((a.get('usuario') or '?') for a in activos)))
         sin_correo = [a.get("usuario") for a in activos if not (a.get("email") or "").strip()]
         if sin_correo:
             mostrar("AVISO", "Administradores activos sin correo", ", ".join(sin_correo))
@@ -244,6 +320,23 @@ def revisar_supabase():
             mostrar("FALLA", "La cadena de auditoría no es íntegra", f"Fila {res.get('id_roto')}: {res.get('motivo')}")
     except Exception as e:
         mostrar("AVISO", "No se pudo verificar la auditoría", f"{type(e).__name__}")
+    revisar_rls(db)
+
+
+def revisar_rls(db):
+    """SIREA 3.5: tablas sin seguridad por filas (RLS). Usa la función de sql/55 (solo lectura)."""
+    try:
+        filas = db.supabase.rpc("sirea_estado_rls").execute().data or []
+    except Exception:
+        mostrar("AVISO", "No se pudo revisar la seguridad por filas (RLS)",
+                "Ejecute sql/55_rls_tablas_base.sql: activa RLS en todas las tablas y agrega la función que lo comprueba.")
+        return
+    sin = sorted(f.get("tabla") for f in filas if not f.get("rls"))
+    if sin:
+        mostrar("FALLA", f"{len(sin)} tabla(s) sin seguridad por filas (RLS)",
+                ", ".join(sin[:15]) + (" …" if len(sin) > 15 else "") + ". Ejecute sql/55_rls_tablas_base.sql.")
+    else:
+        mostrar("OK", f"Seguridad por filas (RLS) activa en las {len(filas)} tablas")
 
 
 def revisar_drive():
@@ -312,6 +405,33 @@ def revisar_ia():
             mostrar("OK" if d["ok"] else "AVISO", f"{d['proveedor']} · {d.get('modelo') or '—'}", limpiar(d["mensaje"])[:300])
     except Exception as e:
         mostrar("AVISO", "No se pudo probar los proveedores", f"{type(e).__name__}")
+
+
+def ejecutar(con_red: bool = True, prueba_correo: str = "", drive: bool = True, ia: bool = True,
+             imprimir: bool = False) -> dict:
+    """
+    Corre las revisiones y devuelve {resultados, registro}. Lo usa la pantalla «Salud del sistema».
+    `drive` incluye la prueba de escritura en las carpetas (sube y quita un archivo de prueba);
+    `ia` consulta a los proveedores con una pregunta mínima (consume cuota).
+    """
+    for k in resultados:
+        resultados[k] = 0
+    registro.clear()
+    _estado["imprimir"] = imprimir
+    try:
+        revisar_variables()
+        revisar_entorno()
+        cred = revisar_credencial_drive()
+        if con_red:
+            revisar_supabase()
+            if drive and (cred is not None or os.getenv("STORAGE_MODE", "").strip().lower() == "local"):
+                revisar_drive()
+            revisar_correo(prueba_correo)
+            if ia:
+                revisar_ia()
+    finally:
+        _estado["imprimir"] = True
+    return {"resultados": dict(resultados), "registro": list(registro)}
 
 
 def main():

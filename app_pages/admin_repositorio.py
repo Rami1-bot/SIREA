@@ -24,7 +24,10 @@ from src.solicitudes_password import fecha_lima
 from utils.duplicados import es_duplicado
 from utils.tema import aviso, chip, kpi, mostrar
 from utils.tema_admin import esc, panel_cab, tabla_df
-from app_pages.admin_helpers import actor_actual
+from app_pages.admin_helpers import actor_actual, boton_protegido
+from app_pages.solicitar_permiso import aviso_sin_permiso, cuadro_solicitud
+
+PRINCIPAL = Config.SUPERADMIN_PRINCIPAL
 
 _ESTADO_SOL = {
     "PENDIENTE": ("Por aprobar", "warn", "reloj"),
@@ -128,8 +131,8 @@ def _al_descargar(rep, actor, descarga_id):
 def _tab_descargar(rep, actor, anio, semana, redes, dup, permitidas, envios, desc, ret):
     tiene, alcance = rep.permisos.alcance(actor, "DESCARGA_MASIVA")
     if not tiene:
-        mostrar(aviso("warn", "No tiene el permiso de descarga masiva",
-                      "Pídale a oiis.winepi que se lo asigne en «Permisos de operación». Mientras tanto puede ver qué hay en la semana, pero no descargarlo."))
+        aviso_sin_permiso("DESCARGA_MASIVA", "No puede preparar ni descargar el ZIP de la semana",
+                          "el cuadro «Solicitar acceso» de la parte de arriba de esta pantalla")
     k1, k2, k3, k4 = st.columns(4)
     with k1:
         mostrar(kpi("Envíos", len(envios), f"Semana {semana} · {anio}", None, "descarga"))
@@ -144,7 +147,13 @@ def _tab_descargar(rep, actor, anio, semana, redes, dup, permitidas, envios, des
         panel_cab("Qué hay en esta selección", "Cantidad de envíos por red")
         mostrar(tabla_df(_tabla_por_red(envios, desc, ret), derecha=("Envíos", "Con archivo", "Duplicados", "Ya descargados", "Ya retirados"),
                          vacio="No hay envíos para esa semana y esas redes."))
-    if not envios or not tiene:
+    if not envios:
+        return
+    if not tiene:
+        with st.container(key="panel_rep_preparar"):
+            panel_cab("2. Preparar el ZIP", "Bloqueado: falta el permiso de descarga masiva")
+            boton_protegido(False, "Preparar ZIP de la selección", key="rep_btn_preparar",
+                            ayuda_bloqueo="Requiere el permiso «Descarga masiva». Pídalo en «Solicitar acceso».")
         return
 
     with st.container(key="panel_rep_preparar"):
@@ -202,8 +211,15 @@ def _tab_retirar(rep, actor, anio, semana, redes, envios, desc, permitidas):
     principal = es_principal(actor)
     tiene, alcance = rep.permisos.alcance(actor, "RETIRO_REPOSITORIO")
     if not tiene:
-        mostrar(aviso("warn", "No tiene el permiso de retiro del repositorio",
-                      "Pídale a oiis.winepi que se lo asigne en «Permisos de operación»."))
+        aviso_sin_permiso("RETIRO_REPOSITORIO", "No puede pedir el retiro de archivos del repositorio",
+                          "el cuadro «Solicitar acceso» de la parte de arriba de esta pantalla")
+        mostrar(aviso("info", "Cómo funciona el retiro",
+                      "Con el permiso, usted elige la semana y las redes, explica el motivo y envía una solicitud; "
+                      f"la aprueba {esc(PRINCIPAL)}. Los archivos van a la papelera de Drive y el registro de recepción se conserva."))
+        with st.container(key="panel_rep_retirar"):
+            panel_cab("2. Pedir el retiro", "Bloqueado: falta el permiso de retiro del repositorio")
+            boton_protegido(False, "Enviar la solicitud de retiro", key="rep_btn_retirar",
+                            ayuda_bloqueo="Requiere el permiso «Retiro del repositorio». Pídalo en «Solicitar acceso».")
         return
     mostrar(aviso(
         "info", "Cómo funciona el retiro",
@@ -390,8 +406,12 @@ def mostrar_descarga_limpieza():
     if es_principal(actor):
         mostrar(aviso("ok", "SUPER_ADMIN principal", "Usted tiene todos los permisos. Sus retiros se ejecutan de inmediato y todo queda registrado."))
     else:
-        chips = " ".join(chip(esc(PERMISOS[p][0]), "info") for p in mios) or chip("Sin permisos asignados", "warn")
-        mostrar(f'<div class="sire-dato"><small>Sus permisos</small><div>{chips}</div></div>')
+        chips = " ".join(
+            chip(esc(PERMISOS[p][0]), "ok", "check") if p in mios else chip(f"{esc(PERMISOS[p][0])} · sin permiso", "warn", "alerta")
+            for p in ("DESCARGA_MASIVA", "RETIRO_REPOSITORIO"))
+        mostrar(f'<div class="sire-dato"><small>Sus permisos en esta pantalla</small><div>{chips}</div></div>')
+        cuadro_solicitud(["DESCARGA_MASIVA", "RETIRO_REPOSITORIO"], "sol_rep",
+                         f"Pida el permiso que le falta a {PRINCIPAL}; mientras tanto puede mirar qué hay en cada semana")
 
     anio, semana, redes, dup, permitidas = _selector(rep, actor, redes_catalogo)
     try:
@@ -401,7 +421,10 @@ def mostrar_descarga_limpieza():
     except Exception as e:
         mostrar(aviso("bad", "No se pudo leer la selección", esc(str(e))))
         return
-    t1, t2, t3, t4 = st.tabs(["Descargar", "Retirar del repositorio", "Solicitudes de retiro", "Historial de descargas"])
+    candado = ":material/lock: "
+    t1, t2, t3, t4 = st.tabs([("" if "DESCARGA_MASIVA" in mios or es_principal(actor) else candado) + "Descargar",
+                              ("" if "RETIRO_REPOSITORIO" in mios or es_principal(actor) else candado) + "Retirar del repositorio",
+                              "Solicitudes de retiro", "Historial de descargas"])
     with t1:
         _tab_descargar(rep, actor, anio, semana, redes, dup, permitidas, envios, desc, ret)
     with t2:

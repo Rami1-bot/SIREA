@@ -12,10 +12,11 @@ import streamlit as st
 from src.auth_red import get_red_auth_manager
 from src.data_loader import get_data_loader
 from utils.helpers import sanitizar_html
+from src.password_policy import PERFIL_RED
 from utils.cuentas_ui import campos_nueva_password, limpiar_campos_password
 from utils.tema import (
-    aplicar_tema, encabezado_publico, pie_pagina, titulo_pagina, mostrar,
-    mostrar_aviso, icono, logo_uri, chip,
+    aplicar_tema, encabezado_publico, pie_pagina, titulo_pagina, mostrar, banda_publica,
+    mostrar_aviso, icono, logo_uri, chip, css_banda,
 )
 from app_pages.red_progreso import mostrar_progreso_red_login
 from src.solicitudes_password import (
@@ -44,82 +45,84 @@ def mostrar_login_red():
     """Muestra el acceso por red: panel informativo a la izquierda y formulario a la derecha."""
 
     aplicar_tema()
-    encabezado_publico("progreso")
-
     data_loader = get_data_loader()
     redes = data_loader.obtener_redes()
 
-    with st.container(key="sire_split_claro"):
-        izq, der = st.columns(2, gap="small")
+    # SIREA 3.5: el acceso va sobre la misma banda azul que el resto (encabezado, menú y figuras de salud);
+    # a la izquierda la explicación, a la derecha la tarjeta blanca del formulario.
+    st.markdown(css_banda(), unsafe_allow_html=True)
+    with st.container(key="sire_banda"):
+        encabezado_publico("progreso")
+        with st.container(key="sire_login"):
+          izq, der = st.columns([1.15, 1], gap="large", vertical_alignment="center")
 
-        with izq:
+          with izq:
             mostrar(f"""
-            {_marca_agua()}
-            <div class="sire-split-in">
-              <span class="sire-pildora">{icono('barras', 15, 'currentColor', 2.4)}Para redes asistenciales</span>
-              <h1>Portal de la red asistencial</h1>
-              <p>Consulte el avance de su red semana a semana, los centros que faltan y el historial de envíos del año.</p>
-              <div style="display:flex;flex-direction:column;gap:16px;margin-top:8px">
-                <div class="sire-pt"><b>1</b><p>Elija su red y escriba la contraseña que le entregó la OIIS.</p></div>
-                <div class="sire-pt"><b>2</b><p>El acceso es de solo lectura y muestra únicamente la información de su propia red.</p></div>
-                <div class="sire-pt"><b>3</b><p>En su primer ingreso se le pedirá definir una contraseña propia.</p></div>
-              </div>
-            </div>
-            <div class="sire-vista" aria-label="Ejemplo ilustrativo del avance de una red">
-              <div class="sire-vista-h"><span>Red de ejemplo · Semana 39</span><small>Ejemplo</small></div>
-              <div class="sire-vista-n"><b>3 de 5</b><span>centros enviaron · 60 %</span></div>
-              <div class="sire-avance-pista" style="margin:0"><div style="width:60%;background:#0077C8"></div></div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <span class="sire-chip" style="background:#E6F4EA;color:#1E6B3A">{icono('check', 13, 'currentColor', 3)}3 enviaron</span>
-                <span class="sire-chip" style="background:#FFF4D6;color:#7A5A00">{icono('reloj', 13, 'currentColor', 3)}2 pendientes</span>
+            <div class="sire-login-txt">
+              <span class="sire-hero-chip"><i></i>Para redes asistenciales</span>
+              <h1 class="sire-bp-h1">Portal de la red asistencial</h1>
+              <p class="sire-bp-p">Consulte el avance de su red semana a semana, los centros que faltan y el historial de envíos del año.</p>
+              <ol class="sire-login-pasos">
+                <li><b>1</b><span>Elija su red y escriba la contraseña que le entregó la OIIS.</span></li>
+                <li><b>2</b><span>El acceso es de solo lectura y muestra únicamente la información de su propia red.</span></li>
+                <li><b>3</b><span>En su primer ingreso se le pedirá definir una contraseña propia.</span></li>
+              </ol>
+              <div class="sire-vista" aria-label="Ejemplo ilustrativo del avance de una red">
+                <div class="sire-vista-h"><span>Red de ejemplo · Semana 39</span><small>Ejemplo</small></div>
+                <div class="sire-vista-n"><b>3 de 5</b><span>centros enviaron · 60 %</span></div>
+                <div class="sire-avance-pista" style="margin:0"><div style="width:60%;background:#0077C8"></div></div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <span class="sire-chip" style="background:#E6F4EA;color:#1E6B3A">{icono('check', 13, 'currentColor', 3)}3 enviaron</span>
+                  <span class="sire-chip" style="background:#FFF3E3;color:#96500A">{icono('reloj', 13, 'currentColor', 3)}2 pendientes</span>
+                </div>
               </div>
             </div>
             """)
 
-        with der:
-            with st.form("login_form_red", clear_on_submit=False):
-                mostrar("""
-                <h2 class="sire-form-t">Ingresar como red</h2>
-                <p class="sire-form-s">Use la contraseña asignada a su red asistencial.</p>
-                """)
-                red = st.selectbox(
-                    "Red asistencial", options=redes, index=None,
-                    placeholder="Seleccione su red", key="input_red_login",
-                )
-                password = st.text_input(
-                    "Contraseña de la red", type="password",
-                    placeholder="Contraseña de su red",
-                    key="input_password_red_login",
-                )
+          with der:
+              with st.form("login_form_red", clear_on_submit=False):
+                  mostrar("""
+                  <h2 class="sire-form-t">Ingresar como red</h2>
+                  <p class="sire-form-s">Use la contraseña asignada a su red asistencial.</p>
+                  """)
+                  red = st.selectbox(
+                      "Red asistencial", options=redes, index=None,
+                      placeholder="Seleccione su red", key="input_red_login",
+                  )
+                  password = st.text_input(
+                      "Contraseña de la red", type="password",
+                      placeholder="Contraseña de su red",
+                      key="input_password_red_login",
+                  )
 
-                submit = st.form_submit_button("Ver el progreso de mi red", width='stretch', type="primary")
+                  submit = st.form_submit_button("Ver el progreso de mi red", width='stretch', type="primary")
 
-                mostrar(f"""
-                <div class="sire-form-nota">{icono('info', 18, '#0077C8', 2.2)}
-                <span>La contraseña la genera y entrega la OIIS; no hay registro ni recuperación automática.
-                Tras 5 intentos fallidos el acceso se bloquea 5 minutos.</span></div>
-                """)
+                  mostrar(f"""
+                  <div class="sire-form-nota">{icono('info', 18, '#0077C8', 2.2)}
+                  <span>La contraseña la genera y entrega la OIIS; no hay registro ni recuperación automática.
+                  Tras 5 intentos fallidos el acceso se bloquea 5 minutos.</span></div>
+                  """)
 
-                if submit:
-                    if red and password:
-                        red_auth = get_red_auth_manager()
-                        resultado = red_auth.login(red, password)
+                  if submit:
+                      if red and password:
+                          red_auth = get_red_auth_manager()
+                          resultado = red_auth.login(red, password)
 
-                        if resultado['exito']:
-                            st.session_state.red_token = resultado['token']
-                            st.session_state.red_actual = resultado['red']
-                            st.session_state.red_logueada = True
-                            st.rerun()
-                        else:
-                            st.error(resultado['mensaje'])
-                    else:
-                        st.warning("Seleccione su red e ingrese la contraseña.")
+                          if resultado['exito']:
+                              st.session_state.red_token = resultado['token']
+                              st.session_state.red_actual = resultado['red']
+                              st.session_state.red_logueada = True
+                              st.rerun()
+                          else:
+                              st.error(resultado['mensaje'])
+                      else:
+                          st.warning("Seleccione su red e ingrese la contraseña.")
 
-            mostrar('<div class="sire-pie-form">¿Es personal de la OIIS?</div>')
-            if st.button("Ir al panel de administración", key="link_ir_admin"):
-                st.session_state.pagina = 'admin'
-                st.session_state.seccion_admin = 'Dashboard'
-                st.rerun()
+              mostrar('<div class="sire-pie-form">¿Es personal de la OIIS?</div>')
+              if st.button("Ir al panel de administración", key="link_ir_admin"):
+                  st.session_state.pagina = 'admin'
+                  st.session_state.seccion_admin = 'Dashboard'
+                  st.rerun()
 
     pie_pagina(margen=0)
 
@@ -143,11 +146,14 @@ def _formulario_cambio_password(red_auth, red: str, obligatorio: bool, key_prefi
     La contraseña debe cumplir la política de src/password_policy.py; la
     pantalla muestra qué falta y por qué se pide cada requisito.
     """
-    nueva, confirmar = campos_nueva_password(
+    nueva, confirmar, zona_boton = campos_nueva_password(
         f"{key_prefix}_pw", contexto=[red],
         etiqueta_nueva="Nueva contraseña", etiqueta_confirmar="Confirmar nueva contraseña",
+        ofrecer_generador=True, perfil=PERFIL_RED, en_vivo=True, zona_boton_out=True,
     )
-    if st.button("Guardar nueva contraseña", key=f"{key_prefix}_guardar", type="primary", use_container_width=True):
+    with zona_boton:
+        guardar = st.button("Guardar nueva contraseña", key=f"{key_prefix}_guardar", type="primary", use_container_width=True)
+    if guardar:
         if not nueva or not confirmar:
             st.error("Complete ambos campos.")
         elif nueva != confirmar:
@@ -303,35 +309,27 @@ def mostrar_cambio_password_obligatorio(red_auth, red: str):
     temporal asignada por el administrador (debe_cambiar_password = True
     en credenciales_red). No se puede omitir ni ver el progreso hasta
     elegir una contraseña propia.
+
+    Los campos van a la izquierda y los requisitos a la derecha, y se marcan
+    mientras la persona escribe.
     """
     aplicar_tema()
     encabezado_publico("progreso")
 
-    with st.container(key="sire_split_claro"):
-        izq, der = st.columns(2, gap="small")
-        with izq:
-            mostrar(f"""
-            {_marca_agua()}
-            <div class="sire-split-in">
-              <span style="width:64px;height:64px;border-radius:18px;background:#FFFFFF;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(0,80,140,.16)">{icono('candado', 32, '#0077C8', 2)}</span>
-              <span class="sire-pildora">Solo en el primer ingreso</span>
-              <h1>Defina su contraseña</h1>
-              <p>La red <strong>{sanitizar_html(str(red))}</strong> ingresó con una contraseña temporal.
-              Por seguridad, elija una contraseña propia para poder ver su progreso.</p>
-              <p style="font-size:15px">Después de guardarla, la contraseña temporal deja de funcionar.</p>
-            </div>
-            <div></div>
-            """)
-        with der:
-            with st.container(key="sire_form_card"):
-                mostrar("""
-                <h2 class="sire-form-t">Cambio de contraseña</h2>
-                <p class="sire-form-s">Elija una contraseña segura que solo usted conozca.</p>
-                """)
-                _formulario_cambio_password(red_auth, red, obligatorio=True, key_prefix="obligatorio")
-                if st.button("Cerrar sesión", key="btn_logout_cambio_obligatorio", use_container_width=True):
-                    _cerrar_sesion_red()
-                    st.rerun()
+    titulo_pagina(
+        "Defina su contraseña",
+        f"La red <strong>{sanitizar_html(str(red))}</strong> ingresó con una contraseña temporal. "
+        "Por seguridad, elija una propia para poder ver su progreso.",
+        migas="Inicio / Mi progreso / Primer ingreso",
+    )
+    mostrar_aviso("info", "Solo en el primer ingreso",
+                  "Después de guardarla, la contraseña temporal deja de funcionar.")
+
+    with st.container(key="sire_form_card"):
+        _formulario_cambio_password(red_auth, red, obligatorio=True, key_prefix="obligatorio")
+        if st.button("Cerrar sesión", key="btn_logout_cambio_obligatorio", type="tertiary"):
+            _cerrar_sesion_red()
+            st.rerun()
 
     pie_pagina(margen=0)
 
@@ -340,31 +338,67 @@ def mostrar_dashboard_red():
     """Muestra el progreso de la red autenticada, con opción de cerrar sesión."""
 
     aplicar_tema()
-    encabezado_publico("progreso")
 
     red = st.session_state.red_actual
     red_auth = get_red_auth_manager()
 
-    col_t, col_b = st.columns([4, 1.4], vertical_alignment="bottom")
-    with col_t:
-        titulo_pagina(
-            f"Progreso de la red {sanitizar_html(str(red))}",
-            "Cumplimiento semanal de su red. Vista de solo lectura.",
-            migas="Inicio / Mi progreso",
-        )
-    with col_b:
-        st.markdown('<div style="height:24px"></div>', unsafe_allow_html=True)
-        if st.button("Cerrar sesión", key="btn_logout_red", use_container_width=True):
-            _cerrar_sesion_red()
-            st.rerun()
+    # Banda azul: nombre de la red, avance de la semana activa y cierre de sesión
+    ficha = ""
+    try:
+        from src.config import Config
+        from app_pages.usuario_logica import calcular_avance_red
+        sem, anio = Config.get_semana_actual(), Config.get_anio_actual()
+        av = calcular_avance_red(red, anio, sem)
+        if av and av.get('total'):
+            n_env, total = len(av['enviados']), av['total']
+            pct = int(round(n_env * 100 / total))
+            r, c = 59, 2 * 3.14159265 * 59
+            ficha = (
+                '<div class="sire-cristal sire-bp-tile" style="flex-wrap:wrap" role="region" aria-label="Avance de la semana">'
+                '<div class="sire-bp-ring"><svg width="130" height="130" viewBox="0 0 130 130" role="img" aria-label="' + str(pct) + ' %">'
+                '<circle cx="65" cy="65" r="59" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="14"/>'
+                f'<circle cx="65" cy="65" r="59" fill="none" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round" '
+                f'stroke-dasharray="{c:.1f}" stroke-dashoffset="{c * (1 - pct / 100):.1f}" transform="rotate(-90 65 65)"/></svg>'
+                f'<div>{pct}%<span>semana {sem}</span></div></div>'
+                '<div style="flex:1 1 150px"><small>Avance de la semana</small>'
+                f'<b style="font-size:26px;line-height:1.1">{n_env} de {total} centros</b>'
+                f'<div class="sire-bp-3"><div><b>{n_env}</b>enviaron</div>'
+                f'<div><b>{total - n_env}</b>pendientes</div></div></div></div>'
+            )
+    except Exception:
+        ficha = ""
+
+    with banda_publica(
+        "progreso", "Mi progreso",
+        "Revise qué centros de su red ya reportaron, cuáles faltan y cómo viene su historial semana a semana. Vista de solo lectura.",
+        chip=f"{'' if str(red).lower().startswith('red') else 'Red '}{sanitizar_html(str(red))} · sesión iniciada", derecha=ficha,
+    ):
+        b1, b2, b3 = st.columns([1, 1.25, 1])
+        with b1:
+            if st.button("Enviar reporte", key="btn_red_ir_enviar", use_container_width=True):
+                st.session_state.pagina = 'usuario'
+                st.rerun()
+        with b2:
+            # Enlace al bloque «Cambiar contraseña» (queda debajo de las tarjetas): se ve y se encuentra fácil.
+            mostrar('<a class="sire-btn-clave" href="#sire-clave" target="_self">'
+                    '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/>'
+                    '<path d="M11 12l9-9M16 7l3 3M14 9l2 2"/></svg>Cambiar contraseña</a>')
+        with b3:
+            if st.button("Cerrar sesión", key="btn_logout_red", use_container_width=True):
+                _cerrar_sesion_red()
+                st.rerun()
 
     if st.session_state.pop('_pw_red_actualizada', False):
         mostrar_aviso("ok", "Su contraseña se actualizó correctamente",
                       "La contraseña anterior ya no funciona. Use la nueva la próxima vez que ingrese.")
 
-    _modulo_cambio_password(red_auth, red)
+    def _bloque_clave():
+        mostrar('<div id="sire-clave" class="sire-ancla"></div>')
+        with st.container(key="sire_clave"):
+            _modulo_cambio_password(red_auth, red)
 
-    mostrar_progreso_red_login(red)
+    mostrar_progreso_red_login(red, despues_resumen=_bloque_clave)
     pie_pagina()
 
 

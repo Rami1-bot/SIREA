@@ -32,6 +32,8 @@ headless = true
 # hasta 200 MB) -- si se sube ese límite más allá de 250 MB, hay que
 # subir también este valor.
 maxUploadSize = 250
+# SIREA 3.5: sirve static/ (las fuentes van dentro del proyecto; no dependen de Google Fonts).
+enableStaticServing = true
 
 # CORS: no se sirve como API para ser consumida desde otros orígenes,
 # así que se deja en su valor seguro por defecto (protegido cuando
@@ -47,13 +49,39 @@ maxUploadSize = 250
 gatherUsageStats = false
 
 [theme]
-# Tema corporativo de SIREA (azul EsSalud). Define los colores base de los
-# componentes nativos de Streamlit (selectores, casillas, tablas); el
-# resto del aspecto lo aporta utils/tema.py.
+# Tema de SIREA 3.5: petróleo, turquesa de vigilancia y ocre quipu (ver utils/tema.py).
+# Define los colores base de los componentes nativos de Streamlit; el resto lo aporta utils/tema.py.
 base = "light"
 primaryColor = "#0077C8"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F4F6F8"
-textColor = "#14202B"
-font = "sans serif"
-baseRadius = "6px"
+secondaryBackgroundColor = "#F4F8FC"
+textColor = "#0F1A33"
+font = "IBM Plex Sans, sans-serif"
+headingFont = "Bricolage Grotesque, sans-serif"
+baseRadius = "8px"
+borderColor = "#D9E7F3"
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-500-normal.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-700-normal.woff2"
+weight = 700
+
+[[theme.fontFaces]]
+family = "Bricolage Grotesque"
+url = "app/static/fonts/bricolage-grotesque-latin-wght-normal.woff2"
+weight = "200 800"

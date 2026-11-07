@@ -28,6 +28,10 @@ except ImportError:
 # ============================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
 ENV_FILE = BASE_DIR / ".env"
+# SIREA 3.5: la fuente principal es .streamlit/secrets.toml; el .env queda como respaldo
+# (load_dotenv no pisa lo que ya se cargó). Ver src/secretos.py y .streamlit/secrets.toml.example.
+from src import secretos as _secretos  # noqa: E402
+SECRETS_FILE, SECRETS_CARGADOS = _secretos.cargar(BASE_DIR)
 load_dotenv(ENV_FILE)
 
 
@@ -76,7 +80,7 @@ class Config:
     # INFORMACIÓN DEL SISTEMA (FIJOS)
     # ============================================================
     APP_NAME = "SIREA · Sistema de Recepción de Reportes Epidemiológicos con Agentes"
-    APP_VERSION = "3.3.0"
+    APP_VERSION = "3.5.0"
     APP_DESCRIPTION = "Sistema de envío y control de reportes para EsSalud"
     ORGANIZATION = "EsSalud - Seguro Social de Salud del Perú"
     
@@ -193,7 +197,9 @@ class Config:
     # SESIONES Y BLOQUEOS DE LOGIN (persistentes en Supabase)
     # ============================================================
     SESION_DURACION_HORAS = int(os.getenv("SESION_DURACION_HORAS", "8") or "8")
-    SESION_INACTIVIDAD_MINUTOS = int(os.getenv("SESION_INACTIVIDAD_MINUTOS", "30") or "30")
+    # Acepta también el nombre de SIRE v7.5 (SESION_INACTIVIDAD_MIN); mínimo 5 minutos.
+    SESION_INACTIVIDAD_MINUTOS = max(5, int(os.getenv("SESION_INACTIVIDAD_MINUTOS")
+                                            or os.getenv("SESION_INACTIVIDAD_MIN") or "30"))
     LOGIN_MAX_INTENTOS_USUARIO = int(os.getenv("LOGIN_MAX_INTENTOS_USUARIO", "5") or "5")
     LOGIN_MAX_INTENTOS_IP = int(os.getenv("LOGIN_MAX_INTENTOS_IP", "20") or "20")
     LOGIN_BLOQUEO_MINUTOS = int(os.getenv("LOGIN_BLOQUEO_MINUTOS", "15") or "15")
@@ -226,6 +232,18 @@ class Config:
     ALERTA_RETIRO_MAX_ARCHIVOS = max(1, int(os.getenv("ALERTA_RETIRO_MAX_ARCHIVOS", "50") or "50"))
     HORARIO_LABORAL_INICIO = int(os.getenv("HORARIO_LABORAL_INICIO", "7") or "7")
     HORARIO_LABORAL_FIN = int(os.getenv("HORARIO_LABORAL_FIN", "20") or "20")
+
+    # ------------------------------------------------------------
+    # Seguridad del panel (v7.5)
+    # ------------------------------------------------------------
+    # Minutos sin actividad tras los cuales se cierra la sesión del panel: ver SESION_INACTIVIDAD_MINUTOS
+    # (sección SESIONES). Este alias se conserva por compatibilidad con el código de SIRE.
+    SESION_INACTIVIDAD_MIN = SESION_INACTIVIDAD_MINUTOS
+    # Días máximos hacia el futuro para la fecha de corte que se guarda en Configuración.
+    CORTE_MAX_DIAS_FUTURO = max(1, int(os.getenv("CORTE_MAX_DIAS_FUTURO", "21") or "21"))
+    # Notificaciones masivas: tope de destinatarios por envío y de correos por hora y por cuenta.
+    NOTIF_MAX_DESTINATARIOS = max(1, int(os.getenv("NOTIF_MAX_DESTINATARIOS", "40") or "40"))
+    NOTIF_MAX_CORREOS_HORA = max(1, int(os.getenv("NOTIF_MAX_CORREOS_HORA", "60") or "60"))
 
     # Correos de administradores (separados por coma)
     EMAIL_ADMINS_STR = os.getenv("EMAIL_ADMINS", "")
@@ -659,13 +677,13 @@ class Config:
         errores = []
         
         if not cls.SUPABASE_URL:
-            errores.append("SUPABASE_URL no está configurado en .env")
+            errores.append("SUPABASE_URL falta en .streamlit/secrets.toml (o en el .env)")
         
         if not cls.SUPABASE_KEY:
-            errores.append("SUPABASE_KEY no está configurado en .env")
+            errores.append("SUPABASE_KEY falta en .streamlit/secrets.toml (o en el .env)")
         
         if not cls.GOOGLE_DRIVE_FOLDER_ID:
-            errores.append("GOOGLE_DRIVE_FOLDER_ID no está configurado en .env")
+            errores.append("GOOGLE_DRIVE_FOLDER_ID falta en .streamlit/secrets.toml (o en el .env)")
         
         creds_path = cls.BASE_DIR / cls.GOOGLE_CREDENTIALS_PATH
         if not creds_path.exists():
@@ -757,7 +775,8 @@ class Config:
         """
         Recarga las variables de entorno.
         """
-        load_dotenv(ENV_FILE, override=True)
+        _secretos.cargar(BASE_DIR)
+        load_dotenv(ENV_FILE, override=False)
 
 
 # ============================================================

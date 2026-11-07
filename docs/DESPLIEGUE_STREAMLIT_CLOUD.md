@@ -6,7 +6,8 @@ Streamlit Cloud toma el código desde **GitHub** y lo ejecuta en sus servidores.
 
 ## Paso 1 · Preparar los secretos (en su computadora)
 
-Con el entorno virtual activado, dentro de la carpeta `sirea`:
+Si ya usa `.streamlit/secrets.toml` (SIREA 3.5, ver `docs/SECRETOS.md`), copie su contenido completo y vaya al
+paso 2. Si todavía tiene un `.env`, dentro de la carpeta `sirea`:
 
 ```powershell
 python scripts/env_a_secrets.py > secretos_para_streamlit.txt

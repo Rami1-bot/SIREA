@@ -323,11 +323,85 @@ def decisiones_del_agente() -> Pendiente:
                      else "Nada escalado.", detalle, origen="regla + IA", accion="Ver en la Bandeja")
 
 
+# ---------------------------------------------------------------- SIREA 3.5 (lo que trajo SIRE v7.5 – v7.6)
+
+def permisos_pedidos() -> Pendiente:
+    from src.agentes.herramientas import solicitudes_de_permiso_pendientes
+    d = solicitudes_de_permiso_pendientes()
+    if not d.get("disponible", True):
+        return Pendiente("permisos", "Solicitudes de permiso", "Permisos de Operacion", "mute", "—",
+                         "Falta la tabla de solicitudes (sql/17).", accion="Ir a Permisos", solo_super_admin=True)
+    n = int(d.get("pendientes") or 0)
+    return Pendiente("permisos", "Solicitudes de permiso", "Permisos de Operacion", "warn" if n else "ok", str(n),
+                     f"{n} solicitud(es) esperan la respuesta del SUPER_ADMIN principal." if n else "Ninguna solicitud pendiente.",
+                     [f"{k}: {v}" for k, v in (d.get("por_permiso") or {}).items()][:5]
+                     + ([f"La más antigua es del {d['mas_antigua']}."] if d.get("mas_antigua") else []),
+                     accion="Ir a Permisos", solo_super_admin=True)
+
+
+def zip_bloqueados() -> Pendiente:
+    from src.agentes.herramientas import zip_bloqueados_recientes
+    d = zip_bloqueados_recientes(7)
+    if not d.get("disponible", True):
+        return Pendiente("seguridad", "ZIP bloqueados por seguridad", "Control de Actividad", "mute", "—",
+                         "La auditoría no está disponible (sql/11).", accion="Ver en Control de actividad")
+    n = int(d.get("total") or 0)
+    detalle = [f"{r}: {c}" for r, c in list((d.get("por_red") or {}).items())[:4]]
+    detalle += [f"Motivo «{m}»: {c}" for m, c in list((d.get("por_motivo") or {}).items())[:3]]
+    if n:
+        detalle.append("Si se repite en una red, llame a su responsable: puede tener un equipo infectado o un exportador mal configurado.")
+    return Pendiente("seguridad", "ZIP bloqueados por seguridad", "Control de Actividad",
+                     "warn" if n >= 3 else ("info" if n else "ok"), str(n),
+                     f"{n} ZIP rechazado(s) en los últimos 7 días." if n else "Ningún ZIP peligroso en los últimos 7 días.",
+                     detalle, accion="Ver en Control de actividad")
+
+
+def cambios_configuracion() -> Pendiente:
+    from src.agentes.herramientas import cambios_de_configuracion_recientes
+    d = cambios_de_configuracion_recientes(7)
+    if not d.get("disponible", True):
+        return Pendiente("configuracion", "Cambios de configuración", "Control de Actividad", "mute", "—",
+                         "La auditoría no está disponible (sql/11).", accion="Ver en Control de actividad")
+    n, alertas = int(d.get("total") or 0), d.get("alertas") or {}
+    serias = {k: v for k, v in alertas.items() if "excepcional" in k.lower() or "deshacer" in k.lower() or "envíos" in k.lower()}
+    return Pendiente("configuracion", "Cambios de configuración", "Control de Actividad",
+                     "warn" if serias else ("info" if n else "ok"), str(n),
+                     (f"{n} cambio(s) en 7 días" + (f", {sum(serias.values())} con alerta." if serias else ".")) if n
+                     else "Sin cambios de configuración en los últimos 7 días.",
+                     [f"{k}: {v}" for k, v in list((d.get("por_tipo") or {}).items())[:4]]
+                     + [f"⚠ {k}: {v}" for k, v in serias.items()], accion="Ver en Control de actividad",
+                     solo_super_admin=True)
+
+
+def salud_sistema() -> Pendiente:
+    from src.agentes.herramientas import estado_salud_sistema
+    d = estado_salud_sistema().get("ultima_revision") or {}
+    if not d:
+        return Pendiente("salud", "Salud del sistema", "Salud del Sistema", "info", "—",
+                         "Aún no se revisó el sistema desde el panel.", ["Pulse «Revisar ahora» en Salud del sistema."],
+                         accion="Ir a Salud del sistema", solo_super_admin=True)
+    r = d.get("resultados") or {}
+    f = _parse(d.get("cuando"))
+    dias = (_ahora() - f).days if f else None
+    fallas, avisos = int(r.get("FALLA") or 0), int(r.get("AVISO") or 0)
+    tono = "bad" if fallas else ("info" if (dias or 0) > 14 or avisos else "ok")
+    resumen = (f"{fallas} falla(s) en la última revisión." if fallas else
+               f"Sin fallas · {avisos} aviso(s)." if avisos else "Todo en verde en la última revisión.")
+    detalle = [f"Revisado hace {dias} día(s)." if dias is not None else ""]
+    if (dias or 0) > 14:
+        detalle.append("Conviene repetir la revisión: tiene más de dos semanas.")
+    return Pendiente("salud", "Salud del sistema", "Salud del Sistema", tono, str(fallas) if fallas else "OK",
+                     resumen, [x for x in detalle if x], accion="Ir a Salud del sistema", solo_super_admin=True)
+
+
 SECCIONES: List[Callable[[], Pendiente]] = [redes_atrasadas, observaciones, decisiones_del_agente, almacenamiento,
-                                            duplicados, cierre, respaldos, solicitudes]
+                                            duplicados, cierre, respaldos, solicitudes,
+                                            permisos_pedidos, zip_bloqueados, cambios_configuracion, salud_sistema]
 _NOMBRES = {"redes_atrasadas": "Redes atrasadas", "observaciones": "Observaciones", "decisiones_del_agente": "Casos escalados",
             "almacenamiento": "Almacenamiento (Drive)", "duplicados": "Duplicados", "cierre": "Cierre de semana",
-            "respaldos": "Respaldos", "solicitudes": "Solicitudes de contraseña"}
+            "respaldos": "Respaldos", "solicitudes": "Solicitudes de contraseña",
+            "permisos_pedidos": "Solicitudes de permiso", "zip_bloqueados": "ZIP bloqueados por seguridad",
+            "cambios_configuracion": "Cambios de configuración", "salud_sistema": "Salud del sistema"}
 
 
 def todos(rol: str = "ADMIN") -> List[Pendiente]:

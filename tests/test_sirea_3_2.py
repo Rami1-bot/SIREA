@@ -424,10 +424,15 @@ def test_informe_pdf_borrador_y_aprobado():
 
 # ---------------- SIREA 3.3: copias en Notificaciones y estadísticas por año ----------------
 
-def test_copias_de_notificaciones_validan_y_no_repiten():
-    from app_pages.admin_notificaciones import _copias, _copias_invalidas
-    assert _copias("a@x.pe, B@x.pe; a@x.pe  c@x.pe", principal="c@x.pe") == ["a@x.pe", "b@x.pe"]
-    assert _copias_invalidas("a@x.pe, no-es-correo") == ["no-es-correo"]
+def test_reparto_de_centros_entre_responsables():
+    # SIREA 3.4: Notificaciones usa los «responsables conocidos» de SIRE v7.4 (las copias van por un interruptor).
+    from app_pages.admin_notificaciones import _centros_por_destino
+    a = {"correo": "a@x.pe", "centros": ["C1"]}
+    b = {"correo": "b@x.pe", "centros": ["C2"]}
+    todos = _centros_por_destino([a, b], ["C1", "C2", "C3"], por_centro=False)
+    assert [cs for _, cs in todos] == [["C1", "C2", "C3"], ["C1", "C2", "C3"]]
+    por = dict((d["correo"], cs) for d, cs in _centros_por_destino([a, b], ["C1", "C2", "C3"], por_centro=True))
+    assert por == {"a@x.pe": ["C1", "C3"], "b@x.pe": ["C2"]}   # lo que nadie atiende va al primero
 
 
 def test_estadisticas_de_la_semana_no_mezclan_anios(bd):

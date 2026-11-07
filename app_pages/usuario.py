@@ -20,6 +20,7 @@ from utils.tema import (
     aplicar_tema, encabezado_publico, pie_pagina, titulo_pagina, mostrar,
     mostrar_aviso, aviso, chip, icono, tarjeta, filas, detalle, hero_acuse,
     seccion, lista_estado, periodo_semana, fecha_corte_info, TONOS, AZUL,
+    banda_publica, css_banda, texto_dias_restantes, actualizar_seccion,
 )
 
 
@@ -168,15 +169,35 @@ def actualizar_centros():
 
 
 def mostrar_encabezado(subtitulo: str = None, migas: str = "Inicio / Enviar reporte"):
-    """Barra superior, titulo de la pagina y datos de la semana en curso."""
+    """Banda azul con el título, el estado de la recepción y la semana en curso."""
 
-    encabezado_publico("enviar")
-    titulo_pagina(
-        "Envío de reporte semanal",
-        subtitulo or "Complete los datos y adjunte el archivo ZIP de su red. "
-                     "Los campos marcados con * son obligatorios.",
-        migas=migas,
+    semana = Config.get_semana_actual()
+    anio = Config.get_anio_actual()
+    corte_txt, corte_dt = fecha_corte_info()
+    dias = texto_dias_restantes(corte_dt)
+    periodo = periodo_semana(anio, semana)
+    vencido = dias == "plazo vencido"
+    if corte_dt is None:
+        chip_txt = "Recepción abierta · fecha de corte por definir"
+    elif vencido:
+        chip_txt = f"Plazo vencido · corte: {corte_txt}"
+    else:
+        chip_txt = f"Recepción abierta · corte: {corte_txt}"
+    ficha = (
+        '<div class="sire-cristal sire-bp-tile" role="region" aria-label="Semana en curso">'
+        f'<span class="sire-bp-num">{semana}</span>'
+        f'<div><small>Semana en curso · {anio}</small><b>{periodo if periodo != "—" else f"Año {anio}"}</b>'
+        f'<b style="font-size:15px;font-weight:600">Fecha límite: {sanitizar_html(corte_txt)}</b>'
+        + (f'<em>{sanitizar_html(dias.capitalize())}</em>' if dias else "")
+        + '</div></div>'
     )
+    with banda_publica(
+        "enviar", "Enviar reporte",
+        subtitulo or "Complete los pasos y adjunte el archivo ZIP de su red. Los campos marcados con * son "
+                     "obligatorios. Al terminar recibirá su acuse de recibo por correo.",
+        chip=chip_txt, chip_cerrada=vencido, derecha=ficha,
+    ):
+        pass
 
 
 def _panel_semana():
@@ -229,6 +250,38 @@ def _panelcalcular_avance_red(red: str):
     mostrar(tarjeta(titulo, cuerpo))
 
 
+def _panel_resumen():
+    """Resumen del envío: anillo con los datos listos y una fila por dato (hecho / falta / revisar)."""
+    filas_r = st.session_state.get('_sire_resumen')
+    if not filas_r:
+        return
+    n_ok = sum(1 for _, _, e in filas_r if e == 'ok')
+    total = len(filas_r)
+    pct = n_ok / total
+    c = 2 * 3.14159265 * 41
+    items = ""
+    for t, v, e in filas_r:
+        if e == 'ok':
+            ic = f'<span class="sire-ck-i">{icono("check", 14, "#1E6B3A", 3.2)}</span>'
+        else:
+            ic = f'<span class="sire-ck-i {e}"></span>'
+        items += (f'<div class="sire-ck">{ic}<div><small>{t}</small>'
+                  f'<b class="{"" if e == "ok" else e}">{sanitizar_html(str(v)) or "—"}</b></div></div>')
+    nota = ("Todo listo: ya puede enviar su reporte." if n_ok == total
+            else "Complete lo que falta para habilitar el botón «Enviar reporte».")
+    if st.session_state.get('_sire_sin_conexion'):
+        nota = "Sin conexión con el sistema: el botón «Enviar reporte» se habilitará cuando vuelva. Lo que ya llenó se conserva."
+    mostrar(
+        '<div class="sire-resumen" role="region" aria-label="Resumen del envío"><div class="sire-resumen-top">'
+        f'<div class="sire-ring"><svg width="92" height="92" viewBox="0 0 92 92"><circle cx="46" cy="46" r="41" fill="none" stroke="#E3F0FA" stroke-width="10"/>'
+        f'<circle cx="46" cy="46" r="41" fill="none" stroke="{"#2E9E5B" if n_ok == total else "#0077C8"}" stroke-width="10" stroke-linecap="round" '
+        f'stroke-dasharray="{c:.1f}" stroke-dashoffset="{c * (1 - pct):.1f}" transform="rotate(-90 46 46)"/></svg><b>{n_ok}/{total}</b></div>'
+        f'<div><h3>Resumen del envío</h3><small>{n_ok} de {total} datos listos</small></div></div>'
+        f'<div style="margin-top:14px">{items}</div>'
+        f'<p style="margin:12px 0 0;font-size:13.5px;color:#566573">{nota}</p></div>'
+    )
+
+
 def _panel_antes_de_enviar():
     mostrar("""
     <div class="sire-panel">
@@ -243,17 +296,15 @@ def _panel_antes_de_enviar():
 
 
 
-@st.dialog("Posible envío duplicado")
+@st.dialog("Posible envío duplicado", width="large")
 def _dialogo_confirmar_envio_duplicado():
     """
     Modal de confirmación mostrado cuando ya existe un envío registrado
     para la misma red/semana/año que incluye alguno de los mismos
     centros que el usuario está a punto de enviar.
 
-    No bloquea el envío -- solo advierte y pide confirmar. Si el
-    usuario confirma ("Sí"), el envío se procesa aquí mismo con los
-    datos guardados en session_state al detectar la coincidencia. Si
-    cancela ("No"), se descarta el intento y no se envía nada.
+    No bloquea el envío -- solo advierte y pide confirmar. Opciones:
+    dividir/enviar como duplicado, reemplazar lo ya enviado (si es posible) o cancelar.
 
     IMPORTANTE: esta función se llama desde mostrar_formulario(), FUERA
     del fragmento _renderizar_seccion_formulario() -- llamar a
@@ -267,59 +318,61 @@ def _dialogo_confirmar_envio_duplicado():
     info = pendiente['duplicado_info']
     plan = pendiente.get('plan') or {}
     dividir = plan.get('modo') == 'dividir'
+    esc = sanitizar_html
 
     if dividir:
-        st.warning(
-            f"Parte de su ZIP ya fue recibida esta semana ({pendiente['semana']}/{pendiente['ano']}, "
-            f"red **{pendiente['red']}**): **{len(plan['repetidos'])} archivo(s)** de "
-            f"{'; '.join(info.get('pares_repetidos') or info['centros_coincidentes'])}."
+        mostrar_aviso(
+            "warn", "Parte de su ZIP ya fue recibida esta semana",
+            f"Semana {esc(str(pendiente['semana']))}/{esc(str(pendiente['ano']))}, red <strong>{esc(str(pendiente['red']))}</strong>: "
+            f"<strong>{len(plan['repetidos'])} archivo(s)</strong> de "
+            f"{esc('; '.join(info.get('pares_repetidos') or info['centros_coincidentes']))}."
         )
-        st.success(
-            f"Los otros **{len(plan['nuevos'])} archivo(s)** son nuevos y se registrarán como un envío normal."
+        mostrar_aviso(
+            "ok", "El resto es nuevo",
+            f"Los otros <strong>{len(plan['nuevos'])} archivo(s)</strong> son nuevos y se registrarán como un envío normal."
         )
     else:
-        st.warning(
-            f"Ya existe un envío registrado para la red **{pendiente['red']}** "
-            f"en la semana {pendiente['semana']}/{pendiente['ano']}, para "
-            f"el/los centro(s): **{', '.join(info['centros_coincidentes'])}**."
+        mostrar_aviso(
+            "warn", "Ya existe un envío registrado",
+            f"Red <strong>{esc(str(pendiente['red']))}</strong> en la semana {esc(str(pendiente['semana']))}/{esc(str(pendiente['ano']))}, "
+            f"para el/los centro(s): <strong>{esc(', '.join(info['centros_coincidentes']))}</strong>."
         )
 
-    st.markdown("**Envío(s) previo(s) encontrado(s):**")
+    # Envíos previos: código, quién lo envió, cuándo y en qué estado
+    filas_prev = ""
     for e in info['envios']:
         fecha = str(e.get('fecha_envio') or '')[:19].replace('T', ' ')
-        st.caption(
-            f"- Código `{e.get('codigo_seguimiento', 'N/A')}` · "
-            f"{e.get('nombre_usuario') or 'N/D'} · {fecha or 'fecha N/D'} · "
-            f"estado {e.get('estado', 'N/D')}"
+        try:  # dd/mm/aaaa hh:mm (formato de la aplicación)
+            from datetime import datetime as _dt
+            fecha = _dt.strptime(fecha[:16], '%Y-%m-%d %H:%M').strftime('%d/%m/%Y %H:%M')
+        except ValueError:
+            pass
+        filas_prev += (
+            f"<tr><td><code>{esc(str(e.get('codigo_seguimiento', 'N/A')))}</code></td>"
+            f"<td>{esc(str(e.get('nombre_usuario') or 'N/D'))}</td>"
+            f"<td>{esc(fecha or 'fecha N/D')}</td>"
+            f"<td><span class='sire-dup-est'>{esc(str(e.get('estado', 'N/D')))}</span></td></tr>"
         )
-
-    if dividir:
-        mostrar_aviso(
-            "warn", "Qué ocurrirá si continúa",
-            "Su ZIP se <strong>dividirá automáticamente</strong>: los archivos nuevos se registran como envío "
-            "normal y los ya recibidos se guardan en la <strong>carpeta de duplicados</strong> sin reemplazar "
-            "al envío anterior (la OIIS será notificada). Recibirá un solo acuse que explica ambas partes."
-        )
-        st.markdown("¿Desea continuar?")
-    else:
-        mostrar_aviso(
-            "warn", "Qué ocurrirá si continúa",
-            "Su archivo se guardará en una <strong>carpeta aparte de duplicados</strong>: "
-            "<strong>no reemplazará</strong> al envío anterior y la OIIS será notificada para revisarlo. "
-            "Recibirá un acuse de color naranja."
-        )
-        st.markdown("¿Desea enviar los archivos de todos modos?")
+    mostrar(
+        '<div class="sire-dup-prev"><div class="sire-dup-t">Envío(s) previo(s) encontrado(s)</div>'
+        '<div class="sire-dup-sc"><table><thead><tr><th>Código</th><th>Enviado por</th><th>Fecha</th><th>Estado</th></tr></thead>'
+        f'<tbody>{filas_prev}</tbody></table></div></div>'
+    )
 
     puede_reemplazar = bool(plan.get('reemplazo_posible'))
-    if puede_reemplazar:
-        mostrar_aviso(
-            "info", "Opción: reemplazar lo ya enviado",
-            "Si este ZIP corrige o completa lo enviado antes, puede <strong>reemplazarlo</strong>: se registra "
-            "<strong>todo este ZIP</strong> como envío normal y los archivos anteriores de esos centros pasan a la "
-            "carpeta <strong>REEMPLAZADOS</strong> (no se borra nada). Si otra persona hizo el envío anterior, se le avisará."
-        )
-    elif plan.get('reemplazo_motivo'):
-        st.caption("Reemplazo no disponible: " + plan['reemplazo_motivo'])
+    if dividir:
+        txt_op1 = ("Su ZIP se <strong>dividirá automáticamente</strong>: los archivos nuevos se registran como envío "
+                   "normal y los ya recibidos se guardan en la <strong>carpeta de duplicados</strong> sin reemplazar "
+                   "al envío anterior (la OIIS será notificada). Recibirá un solo acuse que explica ambas partes.")
+        tit_op1 = "Separar: nuevos y duplicados"
+        btn_op1 = "Sí, dividir y enviar"
+    else:
+        txt_op1 = ("Su archivo se guardará en una <strong>carpeta aparte de duplicados</strong>: "
+                   "<strong>no reemplazará</strong> al envío anterior y la OIIS será notificada para revisarlo. "
+                   "Recibirá un acuse de color naranja.")
+        tit_op1 = "Enviar como duplicado"
+        btn_op1 = "Sí, enviar como duplicado"
+    st.markdown("**¿Desea continuar?**" if dividir else "**¿Desea enviar los archivos de todos modos?**")
 
     def _enviar(**extra):
         with st.spinner("Procesando envío..."):
@@ -344,35 +397,49 @@ def _dialogo_confirmar_envio_duplicado():
         # en su propio st.rerun()): se limpia el estado pendiente para no dejar el diálogo con datos viejos.
         st.session_state.pop('_dup_envio_pendiente', None)
 
+    def _tarjeta_op(icono_svg, titulo, texto, tono):
+        mostrar(
+            f'<div class="sire-dup-op-h sire-dup-{tono}"><span>{icono_svg}</span><b>{titulo}</b></div>'
+            f'<div class="sire-dup-op-p">{texto}</div>'
+        )
+
+    _i_div = ('<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" '
+              'stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v7M12 10l-6 6M12 10l6 6M6 16v5M18 16v5"/></svg>')
+    _i_rep = ('<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" '
+              'stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0113.5-5.8L20 8M20 4v4h-4M20 12a8 8 0 01-13.5 5.8L4 16M4 20v-4h4"/></svg>')
+    _i_no = ('<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" '
+             'stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>')
+
     columnas = st.columns(3 if puede_reemplazar else 2)
 
     with columnas[0]:
-        if st.button(
-            "Sí, dividir y enviar" if dividir else "Sí, enviar como duplicado",
-            key="btn_dup_confirmar_si",
-            use_container_width=True,
-            type="primary"
-        ):
-            _enviar(es_duplicado=not dividir)
+        with st.container(key="dup_op_1"):
+            _tarjeta_op(_i_div, tit_op1, txt_op1, "naranja")
+            if st.button(btn_op1, key="btn_dup_confirmar_si", use_container_width=True, type="primary"):
+                _enviar(es_duplicado=not dividir)
 
     if puede_reemplazar:
         with columnas[1]:
-            if st.button(
-                "Reemplazar los ya enviados",
-                key="btn_dup_reemplazar",
-                use_container_width=True
-            ):
-                _enviar(es_duplicado=False, reemplazar=True)
+            with st.container(key="dup_op_2"):
+                _tarjeta_op(
+                    _i_rep, "Reemplazar lo ya enviado",
+                    "Si este ZIP corrige o completa lo enviado antes, puede <strong>reemplazarlo</strong>: se registra "
+                    "<strong>todo este ZIP</strong> como envío normal y los archivos anteriores de esos centros pasan a la "
+                    "carpeta <strong>REEMPLAZADOS</strong> (no se borra nada). Si otra persona hizo el envío anterior, se le avisará.",
+                    "azul")
+                if st.button("Reemplazar los ya enviados", key="btn_dup_reemplazar", use_container_width=True):
+                    _enviar(es_duplicado=False, reemplazar=True)
 
     with columnas[-1]:
-        if st.button(
-            "No, cancelar",
-            key="btn_dup_confirmar_no",
-            use_container_width=True
-        ):
-            st.session_state.pop('_dup_envio_pendiente', None)
-            st.info("Envío cancelado. No se enviaron archivos.")
-            st.rerun()
+        with st.container(key="dup_op_3"):
+            _tarjeta_op(_i_no, "Cancelar", "No se envía nada. Puede revisar su ZIP y volver a intentarlo.", "gris")
+            if st.button("No, cancelar", key="btn_dup_confirmar_no", use_container_width=True):
+                st.session_state.pop('_dup_envio_pendiente', None)
+                st.info("Envío cancelado. No se enviaron archivos.")
+                st.rerun()
+
+    if not puede_reemplazar and plan.get('reemplazo_motivo'):
+        st.caption("Reemplazo no disponible: " + plan['reemplazo_motivo'])
 
 
 def mostrar_formulario():
@@ -404,9 +471,32 @@ def _renderizar_seccion_formulario():
     with col_form:
         red = _formulario_cuerpo()
     with col_aside:
+        _panel_resumen()
         _panel_semana()
         _panelcalcular_avance_red(red)
         _panel_antes_de_enviar()
+
+
+def _registrar_zip_bloqueado(resultado: dict, red: str, correo: str, nombre_zip: str) -> None:
+    """
+    Deja constancia (una sola vez por archivo y por sesión) de un ZIP que se rechazó por seguridad,
+    para que el «Control de actividad» muestre quién intentó subir qué. Nunca interrumpe el formulario.
+    """
+    try:
+        huella = str(resultado.get('hash_sha256') or '')
+        clave = f"_zip_bloq_{huella}"
+        if not huella or st.session_state.get(clave):
+            return
+        st.session_state[clave] = True
+        from src.auditoria import get_auditoria
+        problemas = resultado.get('archivos_peligrosos') or []
+        get_auditoria().registrar(
+            (correo or '').strip() or f"RED:{red}", "ZIP_BLOQUEADO", "SEGURIDAD", rol="RED",
+            objeto=f"{red} · {nombre_zip}"[:300], resultado="RECHAZADO",
+            detalle={"red": red, "correo": (correo or '').strip(), "zip": nombre_zip, "sha256": huella,
+                     "motivos": [[p.get('archivo'), p.get('motivo')] for p in problemas[:20]]})
+    except Exception as e:
+        print(f"No se pudo registrar el ZIP bloqueado: {e}")
 
 
 def _usar_periodo_del_zip(semana: int, anio: int):
@@ -422,6 +512,8 @@ def _tipo_visible(tipo: str) -> str:
 
 def _mostrar_estado_envio(estado_envio: dict):
     """Aviso de si el envío quedará a tiempo, tardío o no permitido para la semana elegida."""
+    if estado_envio.get('sin_conexion'):
+        return   # ya lo dice la franja de arriba: no se repite aquí
     msg = sanitizar_html(str(estado_envio.get('mensaje', '')))
     no_permitido = estado_envio.get('es_atrasado') and any(
         t in msg for t in ("NO PERMITIDO", "NO PERMITIDA")
@@ -481,7 +573,7 @@ def _formulario_cuerpo():
     # dibujarse en cada ejecución, antes de crear los campos de texto.
     usuarios_frecuentes = frecuentes.almacen()
     with c2:
-        seccion(2, "Responsable del envío")
+        ph2 = seccion(2, "Responsable del envío", reservar=True)
         frecuentes.panel(usuarios_frecuentes)
 
     data_loader = get_data_loader()
@@ -513,7 +605,7 @@ def _formulario_cuerpo():
     idx_anio = anos.index(anio_actual) if anio_actual in anos else 0
 
     with c1:
-        seccion(1, "Red y periodo")
+        ph1 = seccion(1, "Red y periodo", reservar=True)
         col_red, col_anio, col_sem = st.columns([2, 1, 1])
 
         with col_red:
@@ -525,11 +617,16 @@ def _formulario_cuerpo():
             )
 
         with col_anio:
+            # Streamlit avisa si un campo trae «index» y además su valor se fijó por session_state
+            # (el botón «Usar semana X/AAAA» lo hace): el valor inicial solo se pasa mientras no haya uno guardado.
+            if st.session_state.get("sel_anio") not in anos:
+                st.session_state.pop("sel_anio", None)
+            _ini_anio = {} if "sel_anio" in st.session_state else {"index": idx_anio}
             ano_seleccionado = st.selectbox(
                 "Año *",
                 options=anos,
-                index=idx_anio,
-                key="sel_anio"
+                key="sel_anio",
+                **_ini_anio
             )
 
         semanas_disponibles = obtener_semanas_disponibles_por_anio(ano_seleccionado)
@@ -542,11 +639,14 @@ def _formulario_cuerpo():
             idx_semana = semanas_disponibles.index(semana_actual_sistema)
 
         with col_sem:
+            if st.session_state.get("sel_semana") not in semanas_disponibles:
+                st.session_state.pop("sel_semana", None)
+            _ini_sem = {} if "sel_semana" in st.session_state else {"index": idx_semana}
             semana_seleccionada = st.selectbox(
                 "Semana *",
                 options=semanas_disponibles,
-                index=idx_semana,
-                key="sel_semana"
+                key="sel_semana",
+                **_ini_sem
             )
 
         if red_seleccionada != st.session_state.usuario_red_seleccionada:
@@ -556,8 +656,10 @@ def _formulario_cuerpo():
 
         # ---- Estado del envío (a tiempo / atrasado) según la semana elegida ----
         estado_envio = verificar_estado_envio(semana_seleccionada, ano_seleccionado)
+        st.session_state['_sire_sin_conexion'] = bool(estado_envio.get('sin_conexion'))
         _mostrar_estado_envio(estado_envio)
-        st.caption(f"Años permitidos: {', '.join(map(str, anios_permitidos))} · Semanas disponibles: {len(semanas_disponibles)}")
+        if not estado_envio.get('sin_conexion'):
+            st.caption(f"Años permitidos: {', '.join(map(str, anios_permitidos))} · Semanas disponibles: {len(semanas_disponibles)}")
 
         # ---- Centros excluidos por el administrador para esta red ----
         excluidos_red = st.session_state.centros_excluidos.get(red_seleccionada, [])
@@ -577,17 +679,17 @@ def _formulario_cuerpo():
         col1, col2 = st.columns(2)
 
         with col1:
-            apellidos = st.text_input(
-                "Apellidos *",
-                placeholder="Ej. Quispe Rojas",
-                key="input_apellidos"
-            )
-
-        with col2:
             nombres = st.text_input(
                 "Nombres *",
                 placeholder="Ej. María Elena",
                 key="input_nombres"
+            )
+
+        with col2:
+            apellidos = st.text_input(
+                "Apellidos *",
+                placeholder="Ej. Quispe Rojas",
+                key="input_apellidos"
             )
 
         correo, eval_correo = campos_correo_verificado(
@@ -599,7 +701,7 @@ def _formulario_cuerpo():
     # 3. CENTROS Y TIPO DE REPORTE
     # ============================================================
     with c3:
-        seccion(3, "Centros y tipo de reporte")
+        ph3 = seccion(3, "Centros y tipo de reporte", reservar=True)
 
         if red_seleccionada and st.session_state.usuario_centros_disponibles:
             # Filtrar default_centros_validos solo con centros disponibles
@@ -626,19 +728,21 @@ def _formulario_cuerpo():
             )
 
         tipos_reporte = ["Consulta Externa", "Hospitalizacion", "Emergencia"]
-        tipos_seleccionados = st.multiselect(
-            "Tipo de reporte *",
-            options=tipos_reporte,
-            format_func=_tipo_visible,
-            key="multiselect_tipos",
-            placeholder="Seleccione uno o más tipos"
-        )
+        _ico_tipo = {"Consulta Externa": "stethoscope", "Hospitalizacion": "hotel", "Emergencia": "emergency"}
+        with st.container(key="tipos_cards"):
+            tipos_seleccionados = st.pills(
+                "Tipo de reporte *",
+                options=tipos_reporte,
+                selection_mode="multi",
+                format_func=lambda t: f":material/{_ico_tipo.get(t, 'description')}: {_tipo_visible(t)}",
+                key="multiselect_tipos",
+            ) or []
 
     # ============================================================
     # 4. ARCHIVO ZIP
     # ============================================================
     with c4:
-        seccion(4, "Archivo ZIP")
+        ph4 = seccion(4, "Archivo ZIP", reservar=True)
         mostrar_aviso(
             "warn",
             "Requisito del sistema",
@@ -710,6 +814,8 @@ def _formulario_cuerpo():
                 centros_red_completa = obtener_centros_con_red_por_red(red_seleccionada)
                 codigos_red = [c.get('codigo') for c in centros_red_completa if c.get('codigo')]
                 resultado = zip_processor.validar_zip(archivo_bytes, nombre_archivo, codigos_centros=codigos_red)
+                if resultado.get('archivos_peligrosos'):
+                    _registrar_zip_bloqueado(resultado, red_seleccionada, correo, nombre_archivo)
             
                 # Semana/año que traen los NOMBRES de los archivos vs. los que
                 # eligió el remitente (nunca se mira el contenido).
@@ -925,6 +1031,36 @@ def _formulario_cuerpo():
     # MOSTRAR RESUMEN DE VALIDACION
     # ============================================================
     
+    def _estado_grupo(*claves):
+        est = [validaciones[c]['estado'] for c in claves if c in validaciones]
+        return 'error' if 'error' in est else ('falta' if 'pendiente' in est else 'ok')
+
+    _no_permitido = estado_envio.get('es_atrasado', False) and any(
+        t in estado_envio.get('mensaje', '') for t in ("NO PERMITIDO", "NO PERMITIDA"))
+    actualizar_seccion(ph1, 1, "Red y periodo", 'error' if _no_permitido else ('sin_red' if estado_envio.get('sin_conexion') else 'ok'))
+    actualizar_seccion(ph2, 2, "Responsable del envío", _estado_grupo('Nombres', 'Apellidos', 'Correo Electrónico'))
+    actualizar_seccion(ph3, 3, "Centros y tipo de reporte", _estado_grupo('Centros Asistenciales', 'Tipo de Reporte'))
+    actualizar_seccion(ph4, 4, "Archivo ZIP", _estado_grupo('Archivo ZIP'))
+
+    def _fila_resumen(titulo, claves, valor_ok):
+        est = _estado_grupo(*claves)
+        if est == 'ok':
+            txt = valor_ok
+        else:
+            pref = (lambda c: f"{c}: ") if len(claves) > 1 else (lambda c: "")
+            txt = '; '.join(pref(c) + validaciones[c]['mensaje'].lower() if len(claves) > 1 else validaciones[c]['mensaje']
+                            for c in claves if c in validaciones and validaciones[c]['estado'] != 'ok')
+        return (titulo, txt, est)
+
+    st.session_state['_sire_resumen'] = [
+        ("Red y semana", f"{red_seleccionada} · Semana {semana_seleccionada} · {ano_seleccionado}", 'error' if _no_permitido else 'ok'),
+        _fila_resumen("Responsable", ('Nombres', 'Apellidos'), f"{(nombres or '').strip()} {(apellidos or '').strip()}"),
+        _fila_resumen("Correo del acuse", ('Correo Electrónico',), (correo or '').strip()),
+        _fila_resumen("Centros", ('Centros Asistenciales',), validaciones.get('Centros Asistenciales', {}).get('mensaje', '')),
+        _fila_resumen("Tipos de reporte", ('Tipo de Reporte',), ', '.join(_tipo_visible(t) for t in tipos_seleccionados)),
+        _fila_resumen("Archivo ZIP", ('Archivo ZIP',), getattr(archivo, 'name', '') or ''),
+    ]
+
     campos_pendientes = []
     campos_con_error = []
     
@@ -951,6 +1087,8 @@ def _formulario_cuerpo():
     # Verificar adicionalmente que el año este permitido
     if estado_envio.get('es_atrasado', False) and ("NO PERMITIDO" in estado_envio.get('mensaje', '') or "FUTURA NO PERMITIDA" in estado_envio.get('mensaje', '')):
         todos_validos = False
+    if estado_envio.get('sin_conexion'):
+        todos_validos = False   # sin base de datos el envío fallaría: se espera a que vuelva la conexión
     
     with st.form("formulario_envio", clear_on_submit=False):
         
@@ -968,7 +1106,7 @@ def _formulario_cuerpo():
             )
 
         with st.container(key="sec_5"):
-            seccion(5, "Observación (opcional)")
+            seccion(5, "Observación (opcional)", estado="opc")
             sugerir = bool(estado_envio.get('es_atrasado')) or bool(info_zip and info_zip.get('archivos_sin_tipo'))
             st.caption(
                 ("Su envío tiene algo que conviene explicar (por ejemplo, el motivo de un retraso o de nombres de archivo "
@@ -1088,15 +1226,13 @@ def mostrar_confirmacion():
 
     datos = st.session_state.usuario_datos_envio
 
-    # El envío salió bien: el navegador recuerda a esta persona para la próxima vez.
-    if datos.get('correo') and datos.get('codigo'):
-        frecuentes.guardar_tras_envio(
-            datos.get('nombres', ''), datos.get('apellidos', ''), datos.get('correo', ''), str(datos.get('codigo')))
-
     semana_actual_sistema = Config.get_semana_actual()
     anio_actual_sistema = Config.get_anio_actual()
 
-    encabezado_publico("enviar")
+    st.markdown(css_banda(), unsafe_allow_html=True)
+    _banda = st.container(key="sire_banda")
+    with _banda:
+        encabezado_publico("enviar")
 
     # El reporte ya quedó registrado (eso no depende del correo), pero si el
     # acuse de recibo falló al enviarse se avisa para que no sea una sorpresa.
@@ -1121,7 +1257,7 @@ def mostrar_confirmacion():
                    "Este centro ya había sido enviado en la semana indicada"
                    + (f" (envío previo: {previos})" if previos else "")
                    + ". Su archivo se guardó en una carpeta aparte, no reemplaza al anterior y la OIIS lo revisará.",
-                   codigo_txt, migas)
+                   codigo_txt, migas, contenedor=_banda)
         chip_estado = chip("Envío duplicado", "dup", "alerta")
     elif atrasado:
         extra = [f"Semana {sem}/{anio}, ya vencida.", f"Fecha de corte: {fecha_corte_str}."]
@@ -1130,18 +1266,18 @@ def mostrar_confirmacion():
         if datos.get('dias_atraso', 0) > 0:
             extra.append(f"Días de atraso: {datos['dias_atraso']}.")
         hero_acuse("rojo", "Reporte recibido fuera de plazo",
-                   "Su envío quedó registrado como tardío. " + " ".join(extra), codigo_txt, migas)
+                   "Su envío quedó registrado como tardío. " + " ".join(extra), codigo_txt, migas, contenedor=_banda)
         chip_estado = chip("Envío tardío", "bad", "reloj")
     elif estado == 'OBSERVADO':
         hero_acuse("ambar", "Reporte recibido con observaciones",
                    "Su envío quedó registrado, pero requiere revisión. Conserve el código de seguimiento como constancia.",
-                   codigo_txt, migas)
+                   codigo_txt, migas, contenedor=_banda)
         mostrar_aviso("warn", "Observación", sanitizar_html(str(datos.get('observacion') or '')))
         chip_estado = chip("Recibido con observaciones", "warn", "alerta")
     else:
         hero_acuse("azul", "Reporte recibido correctamente",
                    "Su envío quedó registrado dentro del plazo establecido. Conserve el código de seguimiento como constancia.",
-                   codigo_txt, migas)
+                   codigo_txt, migas, contenedor=_banda)
         chip_estado = chip("Recibido a tiempo", "ok", "check")
 
     parte_dup = datos.get('parte_duplicada')
@@ -1203,7 +1339,7 @@ def mostrar_confirmacion():
             + '</div>'
         )
         mostrar(tarjeta("Remitente", filas([
-            ("Apellidos y nombres", f"{esc(datos.get('apellidos', ''))} {esc(datos.get('nombres', ''))}"),
+            ("Nombres y apellidos", f"{esc(datos.get('nombres', ''))} {esc(datos.get('apellidos', ''))}"),
             ("Correo", esc(datos.get('correo', ''))),
         ])))
 
@@ -1221,6 +1357,12 @@ def mostrar_confirmacion():
             _reiniciar_envio()
             st.session_state.pagina = 'red_progreso'
             st.rerun()
+
+    # (al final de la página para no dejar un hueco sobre la banda azul)
+    # El envío salió bien: el navegador recuerda a esta persona para la próxima vez.
+    if datos.get('correo') and datos.get('codigo'):
+        frecuentes.guardar_tras_envio(
+            datos.get('nombres', ''), datos.get('apellidos', ''), datos.get('correo', ''), str(datos.get('codigo')))
 
     pie_pagina()
 

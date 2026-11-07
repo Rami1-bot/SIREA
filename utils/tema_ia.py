@@ -120,7 +120,7 @@ def borrador(texto: str, titulo: str = "Borrador generado por IA", meta: str = "
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">{estado}{chip_proveedor(proveedor, modelo)}</div>
       </div>
       {parrafos(texto)}
-      <div class="sirea-pie-ia">{icono(ico, 14, "#55307F" if not validado else "#1E6B3A", 2.2)}{pie}</div>
+      <div class="sirea-pie-ia">{icono(ico, 14, "#5A2F8A" if not validado else "#1E6B3A", 2.2)}{pie}</div>
     </div>
     """
 
@@ -155,7 +155,7 @@ def burbuja_asistente(texto: str, proveedor: Optional[str] = None, modelo: Optio
     if usadas:
         pie += f" · consultó: {usadas}"
     return (f'<div class="sirea-chat-a">{parrafos(texto)}'
-            f'<div class="sirea-pie-ia">{icono("ia", 13, "#55307F", 2.2)}{pie} {chip_proveedor(proveedor, modelo)}</div></div>')
+            f'<div class="sirea-pie-ia">{icono("ia", 13, "#5A2F8A", 2.2)}{pie} {chip_proveedor(proveedor, modelo)}</div></div>')
 
 
 def mostrar_html(html: str) -> None:

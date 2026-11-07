@@ -1,4 +1,4 @@
-# Gobernanza de la IA de SIREA 3.3
+# Gobernanza de la IA de SIREA 3.4
 
 Material para el informe y la exposición. Todo lo que dice esta página
 existe en el código (se indica el archivo) y se puede mostrar en el panel

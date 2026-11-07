@@ -292,10 +292,18 @@ def verificar_estado_envio(semana_seleccionada: int, anio_seleccionado: int = No
     # ============================================================
     anios_permitidos = obtener_anios_permitidos()
     if anio_seleccionado not in anios_permitidos:
+        sin_conexion = not anios_permitidos   # lista vacía = no se pudo leer la configuración (sin conexión)
+        if sin_conexion:
+            # Mensaje corto y sin datos técnicos: el detalle lo ven solo los administradores en el panel.
+            mensaje = ("El sistema no está disponible en este momento. El envío se habilitará cuando vuelva "
+                       "la conexión; lo que ya llenó se conserva.")
+        else:
+            mensaje = f"AÑO NO PERMITIDO: {anio_seleccionado}. Años permitidos: {', '.join(map(str, anios_permitidos))}"
         return {
             'es_atrasado': True,
+            'sin_conexion': sin_conexion,
             'dias_atraso': 0,
-            'mensaje': f"AÑO NO PERMITIDO: {anio_seleccionado}. Años permitidos: {', '.join(map(str, anios_permitidos))}",
+            'mensaje': mensaje,
             'fecha_limite': None,
             'hora_actual': hora_actual,
             'semanas_atraso': 0,
@@ -921,6 +929,18 @@ def procesar_envio(nombres, apellidos, correo, red, centros, ano, semana, tipos,
     """
     try:
         sustento = limpiar_texto(sustento)
+        # Defensa en el servidor (v7.5): el ZIP se vuelve a revisar por dentro justo antes de subirlo a
+        # Drive. El formulario ya lo bloquea, pero esta es la última puerta y no depende de la pantalla.
+        try:
+            from src.zip_processor import get_zip_processor
+            contenido_zip = archivo.getvalue() if hasattr(archivo, 'getvalue') else None
+            if contenido_zip is not None:
+                revision = get_zip_processor().validar_zip(contenido_zip, getattr(archivo, 'name', 'envio.zip') or 'envio.zip')
+                if revision.get('archivos_peligrosos'):
+                    st.error(revision['mensaje'])
+                    return
+        except Exception as e_seg:
+            logger.warning("No se pudo repetir la revisión de seguridad del ZIP: %s", e_seg)
         semanas_validas = obtener_semanas_disponibles_por_anio(ano)
         if info_zip:
             from src.zip_processor import get_zip_processor
@@ -1504,9 +1524,11 @@ def _registrar_envio_unico(nombres, apellidos, correo, red, centros, ano, semana
 # AVANCE DE UNA RED EN LA SEMANA ACTIVA
 # ============================================================
 
-def _lista_centros_red(red: str, excluidos_red: list) -> list:
-    """Centros de la red que siguen activos (sin los excluidos por el administrador)."""
-    centros_db = obtener_centros_con_red_por_red(red) or []
+def _lista_centros_red(red: str, excluidos_red: list, centros_db: Optional[list] = None) -> list:
+    """Centros de la red que siguen activos (sin los excluidos por el administrador).
+    `centros_db` (SIREA 3.5): catálogo ya leído, para no consultar la base una vez por red."""
+    if centros_db is None:
+        centros_db = obtener_centros_con_red_por_red(red) or []
     activos = []
     for c in centros_db:
         nombre = c.get('centro_nombre', '')
@@ -1542,27 +1564,32 @@ def calcular_avance_red(red: str, anio: int, semana: int):
             return {'total': 0, 'enviados': [], 'pendientes': [], 'excluidos': len(excluidos_red)}
 
         envios = get_db_manager().obtener_envios(anio=anio, semana=semana, red=red, limit=1000)
-
-        # En la tabla envios los centros se guardan como "CODIGO NOMBRE" y en
-        # centros_con_red solo como "NOMBRE"; se comparan por nombre limpio.
-        nombres_enviados = set()
-        for envio in envios or []:
-            centros_envio = envio.get('centros', [])
-            if isinstance(centros_envio, list):
-                for c in centros_envio:
-                    nombre = c.get('nombre', str(c)) if isinstance(c, dict) else extraer_nombre_limpio(str(c))
-                    nombres_enviados.add(nombre.lower())
-
-        enviados, pendientes = [], []
-        for c in activos:
-            nombre = (c.get('centro_nombre', '') or '').strip()
-            etiqueta = formatear_centro_desde_dict(c)
-            (enviados if nombre and nombre.lower() in nombres_enviados else pendientes).append(etiqueta)
-        return {
-            'total': len(activos),
-            'enviados': sorted(enviados),
-            'pendientes': sorted(pendientes),
-            'excluidos': len(excluidos_red),
-        }
+        return avance_desde(activos, envios, len(excluidos_red))
     except Exception:
         return None
+
+
+def avance_desde(activos: list, envios: list, n_excluidos: int) -> Dict:
+    """
+    Cálculo puro del avance de una red (SIREA 3.5: lo comparten la red, el panel y la portada).
+    En la tabla envios los centros se guardan como "CODIGO NOMBRE" y en centros_con_red solo
+    como "NOMBRE"; se comparan por nombre limpio.
+    """
+    nombres_enviados = set()
+    for envio in envios or []:
+        centros_envio = envio.get('centros', [])
+        if isinstance(centros_envio, list):
+            for c in centros_envio:
+                nombre = c.get('nombre', str(c)) if isinstance(c, dict) else extraer_nombre_limpio(str(c))
+                nombres_enviados.add(nombre.lower())
+    enviados, pendientes = [], []
+    for c in activos:
+        nombre = (c.get('centro_nombre', '') or '').strip()
+        etiqueta = formatear_centro_desde_dict(c)
+        (enviados if nombre and nombre.lower() in nombres_enviados else pendientes).append(etiqueta)
+    return {
+        'total': len(activos),
+        'enviados': sorted(enviados),
+        'pendientes': sorted(pendientes),
+        'excluidos': n_excluidos,
+    }

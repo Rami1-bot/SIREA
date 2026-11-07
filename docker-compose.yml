@@ -1,13 +1,15 @@
 # SIREA: web + proceso programado.
 #   docker compose up -d --build
-# Los secretos NO van en la imagen: el .env y credentials/ se montan desde el servidor.
+# Los secretos NO van en la imagen: .streamlit/secrets.toml (o el .env heredado) y credentials/ se montan desde el servidor.
 services:
   app:
     build: .
     image: sirea:latest
     container_name: sirea-app
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - path: .env          # opcional desde SIREA 3.5: la fuente principal es .streamlit/secrets.toml
+        required: false
     environment:
       TZ: America/Lima
     ports:
@@ -17,6 +19,7 @@ services:
     volumes:
       - ./credentials:/app/credentials:ro
       - ./storage:/app/storage
+      - ./.streamlit:/app/.streamlit-host:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8501/_stcore/health"]
       interval: 30s
@@ -28,13 +31,16 @@ services:
     image: sirea:latest
     container_name: sirea-programador
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - path: .env          # opcional desde SIREA 3.5: la fuente principal es .streamlit/secrets.toml
+        required: false
     environment:
       TZ: America/Lima
     command: ["python", "-m", "src.programador"]
     volumes:
       - ./credentials:/app/credentials:ro
       - ./storage:/app/storage
+      - ./.streamlit:/app/.streamlit-host:ro
     healthcheck:
       # El proceso anota un latido cada minuto; si tiene más de 3 minutos, el contenedor se marca como no saludable.
       test: ["CMD", "python", "-c", "import time,sys; sys.exit(0 if time.time()-int(open('/app/storage/logs/programador.latido').read())<180 else 1)"]

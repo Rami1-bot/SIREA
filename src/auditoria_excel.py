@@ -18,7 +18,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from src.auditoria import ETIQUETAS, CATEGORIAS, Auditoria, ahora_lima
-from src.resumen_excel import (AMBAR_BG, AMBAR_FG, AZUL, CLARO, NAVY, ROJO_BG, ROJO_FG, VERDE_BG, VERDE_FG,
+from src.resumen_excel import (pie_impresion, AMBAR_BG, AMBAR_FG, AZUL, CLARO, NAVY, ROJO_BG, ROJO_FG, VERDE_BG, VERDE_FG,
                                _celda, _encabezados)
 from src.solicitudes_password import fecha_lima
 
@@ -68,6 +68,7 @@ def _formato_impresion(ws):
     ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.print_options.horizontalCentered = True
+    pie_impresion(ws)
 
 
 def _pares(ws, fila: int, pares: List[tuple], col_valor_fin: int) -> int:

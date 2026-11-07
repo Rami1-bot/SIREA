@@ -72,18 +72,21 @@ def _parse(valor) -> Optional[datetime]:
 # Destinatarios (los resuelve el sistema, nunca el modelo)
 # ------------------------------------------------------------
 
-def responsables_de_red(red: str, semanas: int = 8, maximo: int = 3) -> List[Dict[str, Any]]:
+def responsables_de_red(red: str, semanas: int = 8, maximo: int = 3, guardados_max: int = 2) -> List[Dict[str, Any]]:
     """
-    Responsables del envío de la red: las personas que de verdad enviaron
-    por ella en las últimas `semanas` (sin repetir), la más reciente
-    primero. [{'correo', 'nombre', 'envios', 'ultimo'}]. Los resuelve el
-    SISTEMA desde los envíos; el modelo nunca elige ni escribe correos.
+    Responsables del envío de la red, resueltos por el SISTEMA (el modelo nunca elige ni escribe correos):
+
+      1. quienes de verdad enviaron por ella en las últimas `semanas` (la más reciente primero, máx. `maximo`);
+      2. SIREA 3.5: los responsables que la OIIS GUARDÓ en Notificaciones (sql/15), hasta `guardados_max`,
+         sin repetir correos. Si nadie envió en ese periodo, el guardado pasa a ser el destinatario.
+
+    [{'correo', 'nombre', 'nombres', 'apellidos', 'envios', 'ultimo', 'origen': 'envio'|'guardado'}]
     """
     try:
         from src.db_manager import get_db_manager
         envios = get_db_manager().obtener_envios(red=red, limit=200) or []
     except Exception:
-        return []
+        envios = []
     limite = _ahora() - timedelta(weeks=semanas)
     vistos: Dict[str, Dict[str, Any]] = {}
     for e in sorted(envios, key=lambda e: str(e.get("fecha_envio") or ""), reverse=True):
@@ -95,9 +98,26 @@ def responsables_de_red(red: str, semanas: int = 8, maximo: int = 3) -> List[Dic
             nombre = f"{e.get('nombre_usuario') or ''} {e.get('apellido_usuario') or ''}".strip() or "responsable de la red"
             vistos[correo] = {"correo": correo, "nombre": nombre, "envios": 0, "ultimo": str(e.get("fecha_envio") or "")[:10],
                               "nombres": str(e.get("nombre_usuario") or "").strip(),
-                              "apellidos": str(e.get("apellido_usuario") or "").strip()}
+                              "apellidos": str(e.get("apellido_usuario") or "").strip(), "origen": "envio"}
         vistos[correo]["envios"] += 1
-    return list(vistos.values())[:maximo]
+    lista = list(vistos.values())[:maximo]
+    if guardados_max > 0 and red:
+        try:
+            from src.responsables_red import get_responsables_red
+            ya = {r["correo"] for r in lista}
+            for g in get_responsables_red().registrados(red):
+                correo = str(g.get("correo") or "").strip().lower()
+                if not correo or correo in ya or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", correo):
+                    continue
+                nombres, apellidos = str(g.get("nombre") or "").strip(), str(g.get("apellido") or "").strip()
+                lista.append({"correo": correo, "nombre": f"{nombres} {apellidos}".strip() or "responsable de la red",
+                              "nombres": nombres, "apellidos": apellidos, "envios": 0, "ultimo": "", "origen": "guardado"})
+                ya.add(correo)
+                if sum(1 for r in lista if r["origen"] == "guardado") >= guardados_max:
+                    break
+        except Exception:  # noqa: BLE001  sin la tabla 15 se sigue con los detectados
+            pass
+    return lista
 
 
 def responsable_de_red(red: str, semanas: int = 8) -> Dict[str, str]:
@@ -327,11 +347,21 @@ def _prep_recordatorio(p: Dict, exp: Dict) -> Dict:
     if not resp:
         return {"destinatario": "", "nombre_destinatario": "", "copias": "",
                 "destinatario_origen": "sin envíos recientes de la red: escriba el correo"}
+    copias = resp[1:]
+    n_env = sum(1 for r in copias if r.get("origen") != "guardado")
+    n_gua = sum(1 for r in copias if r.get("origen") == "guardado")
+    if resp[0].get("origen") == "guardado":
+        origen = "responsable guardado por la OIIS (nadie envió por la red en las últimas 8 semanas)"
+    else:
+        origen = f"quien envió por la red más recientemente ({resp[0]['ultimo']})"
+    extras = []
+    if n_env:
+        extras.append(f"{n_env} responsable(s) más que enviaron en las últimas 8 semanas")
+    if n_gua:
+        extras.append(f"{n_gua} responsable(s) guardado(s) en Notificaciones")
     return {"destinatario": resp[0]["correo"], "nombre_destinatario": resp[0]["nombre"],
-            "copias": ", ".join(r["correo"] for r in resp[1:]),
-            "destinatario_origen": (f"quien envió por la red más recientemente ({resp[0]['ultimo']})"
-                                    + (f"; en copia, {len(resp) - 1} responsable(s) más que enviaron en las últimas 8 semanas"
-                                       if len(resp) > 1 else ""))}
+            "copias": ", ".join(r["correo"] for r in copias),
+            "destinatario_origen": origen + (f"; en copia, {' y '.join(extras)}" if extras else "")}
 
 
 def lista_copias(valor) -> List[str]:

@@ -10,14 +10,15 @@ Todos los roles del panel pueden verlas y marcarlas como revisadas. El menú mue
 """
 
 import time
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
 
 from src.observaciones import get_observaciones
 from utils.tema import mostrar, aviso, chip
-from utils.tema_admin import esc, tabla_df, panel_cab, descargas
+from utils.tema_admin import esc, panel_cab, descargas
+from utils.tabla_navegable import tabla_navegable_df
 from app_pages.admin_helpers import actor_actual, formatear_fecha_columna
 
 _TONO_MOTIVO = {"OBSERVADO": "warn", "DUPLICADO": "dup", "REEMPLAZO": "info", "SUSTENTO": "ok", "FALLA": "bad"}
@@ -57,7 +58,15 @@ def _corto(texto: str) -> str:
     return t if len(t) <= _VISTA_CORTA else t[:_VISTA_CORTA].rstrip() + "…"
 
 
-def _tabla(filas):
+def _clave_fecha_hora(fila):
+    """Clave de orden de la columna «Fecha y hora» (texto dd/mm/aaaa hh:mm)."""
+    try:
+        return (0, datetime.strptime(str(fila[0]), "%d/%m/%Y %H:%M").timestamp(), "")
+    except ValueError:
+        return (1, 0.0, "")
+
+
+def _tabla(filas, clave="obs"):
     vista = pd.DataFrame({
         "Fecha y hora": [formatear_fecha_columna(f.get("fecha_creacion", "")) for f in filas],
         "Enviado por": [f"{f.get('remitente') or ''} · {f.get('correo') or ''}".strip(" ·") for f in filas],
@@ -67,7 +76,15 @@ def _tabla(filas):
         "Motivo": [chip(_NOMBRE_MOTIVO.get(f.get("motivo"), str(f.get("motivo") or "")), _TONO_MOTIVO.get(f.get("motivo"), "info")) for f in filas],
         "Sustento": [_corto(f.get("texto") or f.get("detalle") or "") for f in filas],
     })
-    mostrar(tabla_df(vista, crudas=("Motivo",)))
+    motivos = sorted({_NOMBRE_MOTIVO.get(f.get("motivo"), str(f.get("motivo") or "")) for f in filas})
+    tabla_navegable_df(
+        f"obs_{clave}", vista, crudas=("Motivo",),
+        filtro={"columna": "Motivo", "opciones": motivos, "etiqueta": "Motivo"},
+        filtros=[{"columna": "Red", "etiqueta": "Red"}],
+        claves_orden={"Fecha y hora": _clave_fecha_hora},
+        columnas_elegibles=True, ocultas=("Código",),
+        placeholder="Texto, red, código o quien envió", unidad="observaciones",
+    )
     return vista
 
 
@@ -182,7 +199,7 @@ def _pestana_lista(obs, actor, clave, titulo, subtitulo, vacio_titulo, vacio_tex
         if not vistas:
             mostrar(aviso("ok" if not revisada else "info", vacio_titulo, vacio_texto))
             return
-        _tabla(vistas)
+        _tabla(vistas, clave)
         _detalle(vistas, clave)
         _exportar(vistas, f"observaciones_{clave}", f"obs_{clave}")
         if not revisada:
@@ -198,7 +215,7 @@ def _pestana_fallas(obs, actor):
             return
         mostrar(aviso("warn", "El envío de la red quedó registrado",
                       "Lo que falló fue una tarea interna. Corrija la causa (por ejemplo, el permiso de Drive) y use «Reintentar»."))
-        _tabla(filas)
+        _tabla(filas, "fallas")
         _detalle(filas, "f")
         opciones = {
             f"{f.get('codigo_seguimiento')} · {f.get('red')} · {str(f.get('detalle') or '')[:60]}": f for f in filas

@@ -9,7 +9,8 @@ import streamlit as st
 from src.auth import get_auth_manager
 from src.db_manager import get_db_manager
 from utils.tema import mostrar, aviso, chip
-from utils.tema_admin import tabla_df, panel_cab, esc
+from utils.tema_admin import panel_cab, esc
+from utils.tabla_navegable import tabla_navegable_df
 from utils.cuentas_ui import campos_nueva_password, campo_usuario_con_sugerencias, limpiar_campos_password
 
 
@@ -18,7 +19,7 @@ def _chip_rol(rol):
 
 
 def _chip_activo(valor):
-    return chip("Activo", "ok", "check") if valor in (True, 1, "1", "true", "True") else chip("Inactivo", "mute")
+    return chip("Activo", "ok", "check") if valor in (True, 1, "1", "true", "True", "Activo") else chip("Inactivo", "mute")
 
 
 def mostrar_gestion_admins():
@@ -45,9 +46,15 @@ def mostrar_gestion_admins():
                 'Nombre': df.get('nombre'),
                 'Correo': df.get('email'),
                 'Rol': df.get('rol'),
-                'Estado': df.get('activo', pd.Series([True] * len(df))),
+                'Estado': df.get('activo', pd.Series([True] * len(df))).apply(
+                    lambda v: 'Activo' if v in (True, 1, '1', 'true', 'True') else 'Inactivo'),
             })
-            mostrar(tabla_df(vista, chips={'Rol': _chip_rol, 'Estado': _chip_activo}))
+            tabla_navegable_df(
+                "admins", vista, chips={'Rol': _chip_rol, 'Estado': _chip_activo},
+                filtro={"columna": "Estado", "opciones": ["Activo", "Inactivo"], "etiqueta": "Estado"},
+                filtros=[{"columna": "Rol", "etiqueta": "Rol"}],
+                placeholder="Usuario, nombre o correo", unidad="cuentas",
+            )
         else:
             mostrar(aviso("info", "No hay administradores registrados"))
 

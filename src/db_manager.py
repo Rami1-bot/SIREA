@@ -8,7 +8,7 @@ y centros excluidos.
 import os
 import time
 from supabase import create_client  # noqa: F401  (se conserva por compatibilidad)
-from src.conexion_supabase import crear_cliente_supabase
+from src.conexion_supabase import crear_cliente_supabase, registrar_error
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 import json
@@ -146,9 +146,9 @@ class DatabaseManager:
                     resultado = self.supabase.table('envios').insert(data).execute()
                     return resultado.data[0]['id'] if resultado.data else None
                 except Exception as e2:
-                    print(f"Error al registrar envío: {e2}")
+                    registrar_error(f"Error al registrar envío: {e2}", e2)
                     return None
-            print(f"Error al registrar envío: {e}")
+            registrar_error(f"Error al registrar envío: {e}", e)
             return None
     
     def obtener_envio(self, envio_id: int) -> Optional[Dict]:
@@ -160,7 +160,7 @@ class DatabaseManager:
                 .execute()
             return resultado.data[0] if resultado.data else None
         except Exception as e:
-            print(f"Error al obtener envío: {e}")
+            registrar_error(f"Error al obtener envío: {e}", e)
             return None
     
     def obtener_envio_por_codigo(self, codigo: str) -> Optional[Dict]:
@@ -172,7 +172,7 @@ class DatabaseManager:
                 .execute()
             return resultado.data[0] if resultado.data else None
         except Exception as e:
-            print(f"Error al obtener envío por código: {e}")
+            registrar_error(f"Error al obtener envío por código: {e}", e)
             return None
     
     def obtener_envios(
@@ -220,7 +220,7 @@ class DatabaseManager:
             resultado = query.execute()
             return resultado.data
         except Exception as e:
-            print(f"Error al obtener envíos: {e}")
+            registrar_error(f"Error al obtener envíos: {e}", e)
             return []
     
     def obtener_envios_atrasados(
@@ -256,7 +256,7 @@ class DatabaseManager:
             resultado = query.execute()
             return resultado.data
         except Exception as e:
-            print(f"Error al obtener envíos atrasados: {e}")
+            registrar_error(f"Error al obtener envíos atrasados: {e}", e)
             return []
     
     def obtener_semanas_disponibles(self, anio: Optional[int] = None) -> List[int]:
@@ -269,7 +269,7 @@ class DatabaseManager:
             resultado = query.execute()
             return [item['semana'] for item in resultado.data]
         except Exception as e:
-            print(f"Error al obtener semanas disponibles: {e}")
+            registrar_error(f"Error al obtener semanas disponibles: {e}", e)
             return []
     
     def actualizar_envio(
@@ -303,7 +303,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al actualizar envío: {e}")
+            registrar_error(f"Error al actualizar envío: {e}", e)
             return False
     
     def actualizar_campos_envio(self, envio_id: int, campos: Dict) -> bool:
@@ -314,7 +314,7 @@ class DatabaseManager:
             resultado = self.supabase.table('envios').update(data).eq('id', envio_id).execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al actualizar envío {envio_id}: {e}")
+            registrar_error(f"Error al actualizar envío {envio_id}: {e}", e)
             return False
 
     def eliminar_envio(self, envio_id: int) -> bool:
@@ -326,7 +326,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al eliminar envío: {e}")
+            registrar_error(f"Error al eliminar envío: {e}", e)
             return False
     
     def eliminar_envios_por_red_y_centro(
@@ -354,7 +354,7 @@ class DatabaseManager:
             
             return eliminados
         except Exception as e:
-            print(f"Error al eliminar envíos duplicados: {e}")
+            registrar_error(f"Error al eliminar envíos duplicados: {e}", e)
             return 0
     
     def contar_envios(
@@ -376,7 +376,7 @@ class DatabaseManager:
             resultado = query.execute()
             return resultado.count
         except Exception as e:
-            print(f"Error al contar envíos: {e}")
+            registrar_error(f"Error al contar envíos: {e}", e)
             return 0
     
     def _envios_de_semana(self, semana: int, anio: Optional[int], incluir_atrasados: bool, columnas: str) -> List[Dict]:
@@ -412,7 +412,7 @@ class DatabaseManager:
             
             return resultado
         except Exception as e:
-            print(f"Error al contar envíos por red: {e}")
+            registrar_error(f"Error al contar envíos por red: {e}", e)
             return {}
     
     def contar_envios_por_estado(
@@ -432,7 +432,7 @@ class DatabaseManager:
             
             return resultado
         except Exception as e:
-            print(f"Error al contar envíos por estado: {e}")
+            registrar_error(f"Error al contar envíos por estado: {e}", e)
             return {}
     
     def obtener_centros_por_red(
@@ -460,7 +460,7 @@ class DatabaseManager:
             
             return resultado
         except Exception as e:
-            print(f"Error al obtener centros por red: {e}")
+            registrar_error(f"Error al obtener centros por red: {e}", e)
             return {}
     
     def obtener_estadisticas_semana(
@@ -502,7 +502,7 @@ class DatabaseManager:
                 .execute()
             return resultado.data[0] if resultado.data else None
         except Exception as e:
-            print(f"Error al obtener administrador: {e}")
+            registrar_error(f"Error al obtener administrador: {e}", e)
             return None
     
     def obtener_administradores(self, solo_activos: bool = False) -> List[Dict]:
@@ -515,7 +515,7 @@ class DatabaseManager:
             resultado = query.execute()
             return resultado.data
         except Exception as e:
-            print(f"Error al obtener administradores: {e}")
+            registrar_error(f"Error al obtener administradores: {e}", e)
             return []
     
     def crear_administrador(
@@ -538,7 +538,7 @@ class DatabaseManager:
             resultado = self.supabase.table('administradores').insert(data).execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al crear administrador: {e}")
+            registrar_error(f"Error al crear administrador: {e}", e)
             return False
     
     def actualizar_administrador(
@@ -573,7 +573,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al actualizar administrador: {e}")
+            registrar_error(f"Error al actualizar administrador: {e}", e)
             return False
     
     def renombrar_administrador(self, usuario_actual: str, usuario_nuevo: str) -> bool:
@@ -585,7 +585,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al renombrar administrador: {e}")
+            registrar_error(f"Error al renombrar administrador: {e}", e)
             return False
 
     def actualizar_ultimo_login(self, usuario: str) -> bool:
@@ -597,7 +597,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al actualizar último login: {e}")
+            registrar_error(f"Error al actualizar último login: {e}", e)
             return False
     
     def eliminar_administrador(self, usuario: str) -> bool:
@@ -613,7 +613,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al eliminar administrador: {e}")
+            registrar_error(f"Error al eliminar administrador: {e}", e)
             return False
     
     # ============================================================
@@ -635,7 +635,7 @@ class DatabaseManager:
                 .execute()
             return resultado.data[0] if resultado.data else None
         except Exception as e:
-            print(f"Error al obtener credencial de red: {e}")
+            registrar_error(f"Error al obtener credencial de red: {e}", e)
             return None
 
     def listar_credenciales_red(self) -> List[Dict]:
@@ -647,7 +647,7 @@ class DatabaseManager:
                 .execute()
             return resultado.data
         except Exception as e:
-            print(f"Error al listar credenciales de red: {e}")
+            registrar_error(f"Error al listar credenciales de red: {e}", e)
             return []
 
     def crear_credencial_red(
@@ -674,7 +674,7 @@ class DatabaseManager:
             resultado = self.supabase.table('credenciales_red').insert(data).execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al crear credencial de red: {e}")
+            registrar_error(f"Error al crear credencial de red: {e}", e)
             return False
 
     def actualizar_credencial_red(
@@ -706,7 +706,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al actualizar credencial de red: {e}")
+            registrar_error(f"Error al actualizar credencial de red: {e}", e)
             return False
 
     def actualizar_ultimo_login_red(self, red: str) -> bool:
@@ -718,7 +718,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al actualizar último login de red: {e}")
+            registrar_error(f"Error al actualizar último login de red: {e}", e)
             return False
 
     def eliminar_credencial_red(self, red: str) -> bool:
@@ -730,7 +730,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al eliminar credencial de red: {e}")
+            registrar_error(f"Error al eliminar credencial de red: {e}", e)
             return False
 
     # ============================================================
@@ -770,7 +770,7 @@ class DatabaseManager:
             self._cache_guardar(('cfg', clave), valor)
             return valor
         except Exception as e:
-            print(f"Error al obtener configuración: {e}")
+            registrar_error(f"Error al obtener configuración: {e}", e)
             return None
     
     def actualizar_configuracion(self, clave: str, valor: str) -> bool:
@@ -786,7 +786,7 @@ class DatabaseManager:
             self.invalidar_cache()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al actualizar configuración: {e}")
+            registrar_error(f"Error al actualizar configuración: {e}", e)
             return False
     
     def guardar_configuracion(self, clave: str, valor: str):
@@ -811,7 +811,7 @@ class DatabaseManager:
                                "Revise los permisos de la tabla configuracion (clave de servicio de Supabase).")
             return True, "Guardado."
         except Exception as e:
-            print(f"Error al guardar configuración '{clave}': {e}")
+            registrar_error(f"Error al guardar configuración '{clave}': {e}", e)
             return False, f"No se pudo guardar «{clave}»: {e}"
 
     def obtener_todas_configuraciones(self) -> Dict[str, str]:
@@ -822,7 +822,7 @@ class DatabaseManager:
                 .execute()
             return {item['clave']: item['valor'] for item in resultado.data}
         except Exception as e:
-            print(f"Error al obtener configuraciones: {e}")
+            registrar_error(f"Error al obtener configuraciones: {e}", e)
             return {}
     
     # ============================================================
@@ -839,7 +839,7 @@ class DatabaseManager:
                 .execute()
             return resultado.data[0] if resultado.data else None
         except Exception as e:
-            print(f"Error al obtener carpeta activa: {e}")
+            registrar_error(f"Error al obtener carpeta activa: {e}", e)
             return None
     
     def obtener_carpetas_drive(self) -> List[Dict]:
@@ -852,7 +852,7 @@ class DatabaseManager:
                 .execute()
             return resultado.data
         except Exception as e:
-            print(f"Error al obtener carpetas Drive: {e}")
+            registrar_error(f"Error al obtener carpetas Drive: {e}", e)
             return []
     
     def crear_carpeta_drive(
@@ -871,7 +871,7 @@ class DatabaseManager:
             resultado = self.supabase.table('carpetas_drive').insert(data).execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al crear carpeta Drive: {e}")
+            registrar_error(f"Error al crear carpeta Drive: {e}", e)
             return False
     
     def cambiar_carpeta_activa_detallado(self, carpeta_id: int) -> Tuple[bool, str]:
@@ -901,7 +901,7 @@ class DatabaseManager:
                 raise RuntimeError("la base de datos no confirmó el cambio")
             return True, "Carpeta activada."
         except Exception as e:
-            print(f"Error al cambiar carpeta activa: {e}")
+            registrar_error(f"Error al cambiar carpeta activa: {e}", e)
             try:   # no dejar sin carpeta activa
                 if previa and previa.get('id') != carpeta_id:
                     self.supabase.table('carpetas_drive').update({'activo': True}).eq('id', previa['id']).execute()
@@ -931,7 +931,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al eliminar carpeta Drive: {e}")
+            registrar_error(f"Error al eliminar carpeta Drive: {e}", e)
             return False
     
     # ============================================================
@@ -956,7 +956,7 @@ class DatabaseManager:
             resultado = self.supabase.table('logs').insert(data).execute()
             ok = len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al registrar log: {e}")
+            registrar_error(f"Error al registrar log: {e}", e)
             ok = False
         # Lo mismo queda en la auditoría (solo escritura, con cadena de huellas).
         try:
@@ -988,7 +988,7 @@ class DatabaseManager:
             resultado = query.execute()
             return resultado.data
         except Exception as e:
-            print(f"Error al obtener logs: {e}")
+            registrar_error(f"Error al obtener logs: {e}", e)
             return []
     
     def limpiar_logs_antiguos(self, dias: int = 90) -> int:
@@ -1001,7 +1001,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data)
         except Exception as e:
-            print(f"Error al limpiar logs: {e}")
+            registrar_error(f"Error al limpiar logs: {e}", e)
             return 0
     
     # ============================================================
@@ -1017,7 +1017,7 @@ class DatabaseManager:
                 .execute()
             return resultado.data
         except Exception as e:
-            print(f"Error al obtener años epidemiológicos: {e}")
+            registrar_error(f"Error al obtener años epidemiológicos: {e}", e)
             return []
     
     def obtener_anio_epidemiologico(self, anio: int) -> Optional[Dict]:
@@ -1029,7 +1029,7 @@ class DatabaseManager:
                 .execute()
             return resultado.data[0] if resultado.data else None
         except Exception as e:
-            print(f"Error al obtener año epidemiológico: {e}")
+            registrar_error(f"Error al obtener año epidemiológico: {e}", e)
             return None
     
     def obtener_anio_activo_epidemiologico(self) -> Optional[Dict]:
@@ -1047,7 +1047,7 @@ class DatabaseManager:
             self._cache_guardar(('anio_activo',), valor)
             return dict(valor) if valor else None
         except Exception as e:
-            print(f"Error al obtener año activo: {e}")
+            registrar_error(f"Error al obtener año activo: {e}", e)
             return None
     
     def crear_anio_epidemiologico(
@@ -1076,7 +1076,7 @@ class DatabaseManager:
             self.invalidar_cache()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al crear año epidemiológico: {e}")
+            registrar_error(f"Error al crear año epidemiológico: {e}", e)
             return False
     
     def actualizar_anio_epidemiologico(
@@ -1109,7 +1109,7 @@ class DatabaseManager:
             self.invalidar_cache()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al actualizar año epidemiológico: {e}")
+            registrar_error(f"Error al actualizar año epidemiológico: {e}", e)
             return False
     
     def activar_anio_epidemiologico(self, anio: int) -> bool:
@@ -1140,7 +1140,7 @@ class DatabaseManager:
                 return False
             return True
         except Exception as e:
-            print(f"Error al activar año: {e}")
+            registrar_error(f"Error al activar año: {e}", e)
             return False
     
     def eliminar_anio_epidemiologico(self, anio: int) -> bool:
@@ -1157,7 +1157,7 @@ class DatabaseManager:
             self.invalidar_cache()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al eliminar año: {e}")
+            registrar_error(f"Error al eliminar año: {e}", e)
             return False
     
     def obtener_anios_permitidos(self) -> List[int]:
@@ -1187,7 +1187,7 @@ class DatabaseManager:
             
             return sorted(anios)
         except Exception as e:
-            print(f"Error al obtener años permitidos: {e}")
+            registrar_error(f"Error al obtener años permitidos: {e}", e)
             return []
     
     def obtener_semanas_por_anio(self, anio: int) -> int:
@@ -1198,7 +1198,7 @@ class DatabaseManager:
                 return anio_data.get('semanas', 52)
             return 52
         except Exception as e:
-            print(f"Error al obtener semanas por año: {e}")
+            registrar_error(f"Error al obtener semanas por año: {e}", e)
             return 52
     
     def obtener_semanas_disponibles_por_anio(self, anio: int) -> List[int]:
@@ -1275,7 +1275,7 @@ class DatabaseManager:
                 'tamano_db_mb': 0  # No aplica en Supabase
             }
         except Exception as e:
-            print(f"Error al obtener resumen: {e}")
+            registrar_error(f"Error al obtener resumen: {e}", e)
             return {
                 'total_envios': 0,
                 'total_admins': 0,
@@ -1299,7 +1299,7 @@ class DatabaseManager:
                 .execute()
             return resultado.data[0] if resultado.data else None
         except Exception as e:
-            print(f"Error al obtener red por nombre: {e}")
+            registrar_error(f"Error al obtener red por nombre: {e}", e)
             return None
     
     def obtener_centros_excluidos(self, red_id: Optional[int] = None) -> List[Dict]:
@@ -1315,7 +1315,7 @@ class DatabaseManager:
             resultado = query.execute()
             return resultado.data
         except Exception as e:
-            print(f"Error al obtener centros excluidos: {e}")
+            registrar_error(f"Error al obtener centros excluidos: {e}", e)
             return []
     
     def obtener_centros_excluidos_por_red(self, red_nombre: str) -> List[str]:
@@ -1335,7 +1335,7 @@ class DatabaseManager:
             
             return [item['centro_nombre'] for item in resultado.data]
         except Exception as e:
-            print(f"Error al obtener centros excluidos por red: {e}")
+            registrar_error(f"Error al obtener centros excluidos por red: {e}", e)
             return []
     
     def obtener_todas_las_exclusiones_agrupadas(self) -> Dict[str, List[str]]:
@@ -1362,7 +1362,7 @@ class DatabaseManager:
             
             return exclusiones
         except Exception as e:
-            print(f"Error al obtener exclusiones agrupadas: {e}")
+            registrar_error(f"Error al obtener exclusiones agrupadas: {e}", e)
             return {}
     
     def agregar_centro_excluido(
@@ -1401,7 +1401,7 @@ class DatabaseManager:
             resultado = self.supabase.table('centros_excluidos').insert(data).execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al agregar centro excluido: {e}")
+            registrar_error(f"Error al agregar centro excluido: {e}", e)
             return False
     
     def eliminar_centro_excluido(self, red_nombre: str, centro_nombre: str) -> bool:
@@ -1421,7 +1421,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al eliminar centro excluido: {e}")
+            registrar_error(f"Error al eliminar centro excluido: {e}", e)
             return False
     
     def limpiar_centros_excluidos(self, red_nombre: str) -> bool:
@@ -1439,7 +1439,7 @@ class DatabaseManager:
                 .execute()
             return True
         except Exception as e:
-            print(f"Error al limpiar centros excluidos: {e}")
+            registrar_error(f"Error al limpiar centros excluidos: {e}", e)
             return False
     
     def verificar_centro_excluido(self, red_nombre: str, centro_nombre: str) -> bool:
@@ -1458,7 +1458,7 @@ class DatabaseManager:
                 .execute()
             return len(resultado.data) > 0
         except Exception as e:
-            print(f"Error al verificar centro excluido: {e}")
+            registrar_error(f"Error al verificar centro excluido: {e}", e)
             return False
     
     def contar_centros_excluidos(self, red_nombre: str) -> int:
@@ -1476,7 +1476,7 @@ class DatabaseManager:
                 .execute()
             return resultado.count
         except Exception as e:
-            print(f"Error al contar centros excluidos: {e}")
+            registrar_error(f"Error al contar centros excluidos: {e}", e)
             return 0
 
     # ============================================================
@@ -1508,7 +1508,7 @@ class DatabaseManager:
             }).execute()
             return r.data[0] if r.data else None
         except Exception as e:
-            print(f"Error al crear solicitud de contraseña: {e}")
+            registrar_error(f"Error al crear solicitud de contraseña: {e}", e)
             return None
 
     def obtener_solicitud_password(self, solicitud_id) -> Optional[Dict]:
@@ -1516,7 +1516,7 @@ class DatabaseManager:
             r = self.supabase.table('solicitudes_password').select('*').eq('id', solicitud_id).execute()
             return r.data[0] if r.data else None
         except Exception as e:
-            print(f"Error al obtener solicitud de contraseña: {e}")
+            registrar_error(f"Error al obtener solicitud de contraseña: {e}", e)
             return None
 
     def listar_solicitudes_password(
@@ -1532,7 +1532,7 @@ class DatabaseManager:
             r = q.order('fecha_creacion', desc=True).limit(limit).execute()
             return r.data or []
         except Exception as e:
-            print(f"Error al listar solicitudes de contraseña: {e}")
+            registrar_error(f"Error al listar solicitudes de contraseña: {e}", e)
             return []
 
     def contar_solicitudes_password(self, estado: str = 'PENDIENTE') -> int:
@@ -1552,7 +1552,7 @@ class DatabaseManager:
             r = self.supabase.table('solicitudes_password').update(datos).eq('id', solicitud_id).execute()
             return len(r.data) > 0
         except Exception as e:
-            print(f"Error al actualizar solicitud de contraseña: {e}")
+            registrar_error(f"Error al actualizar solicitud de contraseña: {e}", e)
             return False
 
     def agregar_mensaje_solicitud(self, solicitud_id, autor_tipo: str, autor: str, mensaje: str) -> bool:
@@ -1562,7 +1562,7 @@ class DatabaseManager:
             }).execute()
             return len(r.data) > 0
         except Exception as e:
-            print(f"Error al guardar mensaje de solicitud: {e}")
+            registrar_error(f"Error al guardar mensaje de solicitud: {e}", e)
             return False
 
     def obtener_mensajes_solicitud(self, solicitud_id) -> List[Dict]:
@@ -1571,7 +1571,7 @@ class DatabaseManager:
                 .eq('solicitud_id', solicitud_id).order('fecha').order('id').execute()
             return r.data or []
         except Exception as e:
-            print(f"Error al obtener mensajes de solicitud: {e}")
+            registrar_error(f"Error al obtener mensajes de solicitud: {e}", e)
             return []
 
 

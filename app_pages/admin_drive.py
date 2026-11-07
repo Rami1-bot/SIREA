@@ -11,7 +11,9 @@ from src.db_manager import get_db_manager
 from src.drive_manager import get_drive_manager
 from utils.tema import mostrar, aviso, chip, kpi
 from utils.tema_admin import tabla_df, panel_cab, esc
-from app_pages.admin_helpers import requerir_admin
+from app_pages.admin_helpers import requerir_admin, estado_configuracion, campo_motivo, limpiar_motivo, boton_cfg, aviso_solo_consulta
+from app_pages.solicitar_permiso import cuadro_solicitud
+from src.cambios_configuracion import get_cambios_configuracion
 
 
 def _chip_activo(valor):
@@ -64,6 +66,10 @@ def mostrar_gestion_drive():
     """Muestra la gestion de Google Drive."""
 
     requerir_admin()
+    # v7.5: agregar, activar o eliminar carpetas exige permiso y motivo.
+    actor, puede = estado_configuracion()
+    cambios_cfg = get_cambios_configuracion()
+    boton = boton_cfg(puede)
 
     db_manager = get_db_manager()
     try:
@@ -136,6 +142,16 @@ def mostrar_gestion_drive():
             mostrar(aviso("info", "No hay carpetas registradas"))
 
     # ============================================================
+    # MOTIVO DEL CAMBIO (v7.5)
+    # ============================================================
+    with st.container(key="panel_drive_motivo"):
+        panel_cab("Motivo del cambio", "Se pide para agregar, activar o eliminar una carpeta; queda en la auditoría y se avisa por correo")
+        if not puede:
+            aviso_solo_consulta("No puede agregar, activar ni eliminar carpetas")
+        motivo = campo_motivo("drive_motivo", puede)
+    cuadro_solicitud(["CONFIGURACION"], "sol_drive")
+
+    # ============================================================
     # AGREGAR
     # ============================================================
     with st.container(key="panel_drive_agregar"):
@@ -149,15 +165,20 @@ def mostrar_gestion_drive():
             with col3:
                 capacidad_maxima = st.number_input("Capacidad máxima (MB)", min_value=100, max_value=10000, value=1000)
 
-            if st.form_submit_button("Agregar carpeta", type="primary", icon=":material/create_new_folder:"):
-                if not nombre_carpeta or not folder_id:
-                    st.error("Nombre e ID son obligatorios.")
+            if puede:
+                enviar_carpeta = st.form_submit_button("Agregar carpeta", type="primary", icon=":material/create_new_folder:")
+            else:
+                with st.container(key="bloq_drive_agregar"):
+                    st.form_submit_button("Agregar carpeta (requiere permiso)", icon=":material/lock:", disabled=True)
+                enviar_carpeta = False
+            if enviar_carpeta:
+                ok, msg = cambios_cfg.crear_carpeta(actor, nombre_carpeta, folder_id, int(capacidad_maxima), motivo)
+                if ok:
+                    limpiar_motivo("drive_motivo")
+                    st.toast(msg, icon=":material/check_circle:")
+                    st.rerun()
                 else:
-                    if db_manager.crear_carpeta_drive(nombre_carpeta, folder_id, capacidad_maxima):
-                        st.toast(f"Carpeta {nombre_carpeta} agregada.", icon=":material/check_circle:")
-                        st.rerun()
-                    else:
-                        st.error("No se pudo agregar la carpeta.")
+                    st.error(msg)
 
     # ============================================================
     # ACTIVAR / ELIMINAR
@@ -182,11 +203,12 @@ def mostrar_gestion_drive():
                         "Carpeta a activar", [c['nombre'] for c in activables], key="drive_activar_sel"
                     )
                 with col2:
-                    if st.button("Activar carpeta", use_container_width=True, type="primary", key="drive_activar"):
+                    if boton("Activar carpeta", use_container_width=True, type="primary", key="drive_activar"):
                         carpeta_id = next(c['id'] for c in activables if c['nombre'] == carpeta_a_activar)
-                        ok, detalle = db_manager.cambiar_carpeta_activa_detallado(carpeta_id)
+                        ok, detalle = cambios_cfg.activar_carpeta(actor, carpeta_id, carpeta_a_activar, motivo)
                         if ok:
-                            st.toast(f"Carpeta «{carpeta_a_activar}» activada.", icon=":material/check_circle:")
+                            limpiar_motivo("drive_motivo")
+                            st.toast(detalle, icon=":material/check_circle:")
                             st.rerun()
                         else:
                             mostrar(aviso("bad", "No se pudo activar la carpeta", esc(detalle)))
@@ -206,14 +228,16 @@ def mostrar_gestion_drive():
                 with col2:
                     confirmar = st.checkbox(f"Confirmo que deseo eliminar «{carpeta_a_eliminar}»", key="drive_confirma")
                 with col3:
-                    if st.button("Eliminar carpeta", type="primary", use_container_width=True,
+                    if boton("Eliminar carpeta", type="primary", use_container_width=True,
                                  icon=":material/delete:", key="drive_eliminar"):
                         if not confirmar:
                             st.warning("Marque la casilla de confirmación para eliminar.")
                         else:
                             carpeta_id = next(c['id'] for c in carpetas_inactivas if c['nombre'] == carpeta_a_eliminar)
-                            if db_manager.eliminar_carpeta_drive(carpeta_id):
-                                st.toast(f"Carpeta «{carpeta_a_eliminar}» eliminada.", icon=":material/check_circle:")
+                            ok, msg = cambios_cfg.eliminar_carpeta(actor, carpeta_id, carpeta_a_eliminar, motivo)
+                            if ok:
+                                limpiar_motivo("drive_motivo")
+                                st.toast(msg, icon=":material/check_circle:")
                                 st.rerun()
                             else:
-                                st.error("No se pudo eliminar. Solo se pueden eliminar carpetas inactivas.")
+                                st.error(msg)

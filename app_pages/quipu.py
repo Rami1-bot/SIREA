@@ -47,9 +47,15 @@ SUGERENCIAS_BASE = ["¿Qué redes faltan esta semana?", "¿Qué le falta a cada 
 SUGERENCIAS = {
     "Notificaciones": "¿A qué redes conviene recordar hoy?",
     "Seguimiento": "¿Cuántos centros faltan por red?",
-    "Envíos tardíos": "¿Qué redes enviaron tarde esta semana?",
+    "Control de atrasos": "¿Qué redes enviaron tarde esta semana?",
     "Agente de IA": "¿Qué propuestas esperan mi decisión?",
     "Observaciones": "¿Qué observaciones siguen sin revisar?",
+    # SIREA 3.5
+    "Control de actividad": "¿Se bloquearon ZIP por seguridad esta semana?",
+    "Configuración": "¿Qué cambios de configuración hubo esta semana?",
+    "Permisos de operación": "¿Qué permisos están pidiendo?",
+    "Salud del sistema": "¿Cómo está el sistema y cuándo fue el último respaldo?",
+    "Panel de control": "¿Qué redes no tienen responsable guardado?",
 }
 
 
@@ -173,7 +179,8 @@ def _panel(pantalla: str, grande: bool):
         else:
             mostrar(f'<div class="quipu-vacio">Hola, soy {NOMBRE}. Leo lo que hay en SIREA y le respondo en simple. '
                     'No envío ni cambio nada. Pruebe con:</div>')
-            sug = SUGERENCIAS_BASE[:2] + ([SUGERENCIAS[pantalla]] if pantalla in SUGERENCIAS else SUGERENCIAS_BASE[2:])
+            propia = next((v for k, v in SUGERENCIAS.items() if str(pantalla or "").startswith(k)), None)
+            sug = SUGERENCIAS_BASE[:2] + ([propia] if propia else SUGERENCIAS_BASE[2:])
             for i, s in enumerate(sug):
                 st.button(s, key=f"quipu_sug_{i}", on_click=_sugerir, args=(s,), use_container_width=True)
         error = st.session_state.pop("sirea_asist_error", None)

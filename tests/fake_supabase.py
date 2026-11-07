@@ -228,7 +228,9 @@ class FakeSupabase:
     def from_(self, nombre):
         return _Query(self, nombre)
 
-    def rpc(self, *a, **k):
+    def rpc(self, nombre=None, *a, **k):
+        if nombre == "sirea_estado_rls":      # SIREA 3.5 (sql/55): todas las tablas con RLS
+            return _RPC([{"tabla": t, "rls": True} for t in sorted(self.tablas)])
         return _RPC([])
 
     # ---------------- datos de demostración ----------------
@@ -258,6 +260,10 @@ class FakeSupabase:
             for j in range(4):
                 self.tablas["centros"].append({"id": len(self.tablas["centros"]) + 1, "red_id": r["id"],
                                                "codigo": f"{r['id']}{j:02d}", "nombre": f"C.M. DEMO {r['nombre'][:3]} {j + 1}"})
+        # Vista centros_con_red (en Supabase la arma la base desde redes + centros).
+        nombres_red = {r["id"]: r["nombre"] for r in self.tablas["redes"]}
+        self.tablas["centros_con_red"] = [{"id": c["id"], "red_id": c["red_id"], "red_nombre": nombres_red[c["red_id"]],
+                                           "codigo": c["codigo"], "centro_nombre": c["nombre"]} for c in self.tablas["centros"]]
         self.tablas["centros_excluidos"] = [{"id": 1, "red_id": 2, "centro_nombre": "C.M. DEMO ANC 4", "motivo": "Sin personal (caso excepcional)",
                                              "creado_por": "oiis.winepi", "fecha_exclusion": ahora.isoformat()}]
         self.tablas["credenciales_red"] = [{"id": 1, "red": "ANCASH", "password_hash": hash_password("Red-Ancash-2026!"), "activo": True,

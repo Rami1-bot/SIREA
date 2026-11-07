@@ -424,6 +424,132 @@ def actividad_ia_reciente(dias: int = 7) -> Dict:
 
 
 # ============================================================
+# SIREA 3.5: lo que trajo SIRE v7.4 – v7.6 (y la salud del sistema)
+# Mismas reglas: solo lectura, datos agregados, sin nombres ni correos.
+# ============================================================
+
+def _desde_lima(dias: int) -> str:
+    from datetime import timedelta
+    from src.auditoria import ahora_lima, FORMATO
+    return (ahora_lima() - timedelta(days=max(1, min(int(dias or 7), 90)))).strftime(FORMATO)
+
+
+def _motivo_corto(texto: str) -> str:
+    t = str(texto or "").lower()
+    for clave, nombre in (("ejecutable", "programa ejecutable"), ("script", "script o código"), ("macro", "hoja con macros"),
+                          ("comprimido", "archivo comprimido dentro del ZIP"), ("bomba", "posible ZIP bomba"),
+                          ("doble extensión", "doble extensión"), ("fórmula", "fórmulas peligrosas"),
+                          ("contraseña", "ZIP con contraseña"), ("ruta", "ruta insegura")):
+        if clave in t:
+            return nombre
+    return "otro motivo de seguridad"
+
+
+def zip_bloqueados_recientes(dias: int = 7) -> Dict:
+    """ZIP rechazados por seguridad en los últimos días: total, por red y por tipo de motivo (sin personas ni archivos)."""
+    try:
+        from src.auditoria import get_auditoria
+        aud = get_auditoria()
+        filas = aud.listar(desde=_desde_lima(dias), accion="ZIP_BLOQUEADO", limite=1000)
+    except Exception:
+        return {'disponible': False}
+    por_red, por_motivo = {}, {}
+    for f in filas:
+        d = aud.detalle_de(f)
+        red = str(d.get('red') or '—')
+        por_red[red] = por_red.get(red, 0) + 1
+        for _arch, motivo in (d.get('motivos') or [])[:20]:
+            m = _motivo_corto(motivo)
+            por_motivo[m] = por_motivo.get(m, 0) + 1
+    return guardrails.sanitizar_para_modelo({
+        'dias': int(dias or 7), 'total': len(filas),
+        'por_red': dict(sorted(por_red.items(), key=lambda x: -x[1])[:20]),
+        'por_motivo': dict(sorted(por_motivo.items(), key=lambda x: -x[1]))})
+
+
+def cambios_de_configuracion_recientes(dias: int = 14) -> Dict:
+    """Cambios de semana, corte, años, exclusiones y carpetas de Drive en los últimos días, con sus alertas (sin personas)."""
+    try:
+        from src.auditoria import get_auditoria, CAMBIOS_DE_CONFIGURACION, ETIQUETAS
+        aud = get_auditoria()
+        filas = [f for f in aud.listar(desde=_desde_lima(dias), categoria="CONFIGURACION", limite=1000)
+                 if f.get('accion') in CAMBIOS_DE_CONFIGURACION]
+    except Exception:
+        return {'disponible': False}
+    por_tipo, alertas, ultimos = {}, {}, []
+    for f in filas:
+        nombre = ETIQUETAS.get(f.get('accion'), f.get('accion'))
+        por_tipo[nombre] = por_tipo.get(nombre, 0) + 1
+        for a in (aud.detalle_de(f).get('alertas') or []):
+            alertas[str(a)] = alertas.get(str(a), 0) + 1
+        if len(ultimos) < 8:
+            ultimos.append({'que': nombre, 'cuando': str(f.get('ocurrio_iso') or '')[:16], 'rol': f.get('rol'),
+                            'resultado': f.get('resultado')})
+    return guardrails.sanitizar_para_modelo({'dias': int(dias or 14), 'total': len(filas), 'por_tipo': por_tipo,
+                                             'alertas': alertas, 'ultimos': ultimos})
+
+
+def solicitudes_de_permiso_pendientes() -> Dict:
+    """Solicitudes de permiso que esperan la respuesta del SUPER_ADMIN principal: cuántas, de qué permiso y desde cuándo."""
+    try:
+        from src.solicitudes_permiso import get_solicitudes_permiso
+        from src.permisos import PERMISOS
+        sol = get_solicitudes_permiso()
+        if not sol.disponible():
+            return {'disponible': False}
+        pend = sol.listar(estado="PENDIENTE", limite=200)
+    except Exception:
+        return {'disponible': False}
+    por_permiso = {}
+    for s in pend:
+        n = PERMISOS.get(s.get('permiso'), (s.get('permiso'),))[0]
+        por_permiso[n] = por_permiso.get(n, 0) + 1
+    mas_antigua = min((str(s.get('creada_en') or '') for s in pend), default='')
+    return guardrails.sanitizar_para_modelo({'pendientes': len(pend), 'por_permiso': por_permiso,
+                                             'mas_antigua': mas_antigua[:10] or None})
+
+
+def cobertura_de_responsables() -> Dict:
+    """Cuántas redes tienen responsables guardados en Notificaciones y cuáles no tienen ninguno (sin nombres ni correos)."""
+    try:
+        from src.responsables_red import get_responsables_red
+        resp = get_responsables_red()
+        if not resp.disponible():
+            return {'disponible': False}
+        redes = listar_redes()
+        sin = [r for r in redes if not resp.registrados(r)]
+    except Exception:
+        return {'disponible': False}
+    return guardrails.sanitizar_para_modelo({'redes': len(redes), 'con_responsable_guardado': len(redes) - len(sin),
+                                             'sin_responsable_guardado': sin[:40]})
+
+
+def estado_salud_sistema() -> Dict:
+    """Última revisión de «Salud del sistema», latido del proceso programado y último respaldo."""
+    import json as _json
+    out = {}
+    try:
+        v = get_db_manager().obtener_configuracion("salud_ultima_revision")
+        if v:
+            d = _json.loads(v)
+            out['ultima_revision'] = {'cuando': str(d.get('cuando') or '')[:16], 'resultados': d.get('resultados')}
+    except Exception:
+        pass
+    try:
+        out['ultimo_latido_programador'] = str(get_db_manager().obtener_configuracion("programador_ultimo_latido") or '')[:16] or None
+    except Exception:
+        pass
+    try:
+        from src.respaldos import get_respaldos
+        r = get_respaldos().listar(limite=1)
+        if r:
+            out['ultimo_respaldo'] = {'estado': r[0].get('estado'), 'fecha': str(r[0].get('fecha_creacion') or '')[:16]}
+    except Exception:
+        pass
+    return guardrails.sanitizar_para_modelo(out)
+
+
+# ============================================================
 # REGISTRO NEUTRO (para cualquier proveedor): nombre, descripción,
 # esquema JSON de parámetros y función. TODAS son de SOLO LECTURA.
 # No agregar aquí ninguna función que escriba, envíe correos o cambie
@@ -481,6 +607,16 @@ def registro_herramientas():
           propuestas_pendientes_del_agente),
         H('actividad_ia_reciente', 'Qué hizo la IA en los últimos días (propuestas, aprobaciones, rechazos, consultas).',
           _esq(dias={'type': 'integer', 'description': 'Días hacia atrás (1 a 60).'}), actividad_ia_reciente),
+        # SIREA 3.5
+        H('zip_bloqueados_recientes', 'ZIP rechazados por seguridad (programas, macros, ZIP bomba…) por red y por motivo.',
+          _esq(dias={'type': 'integer', 'description': 'Días hacia atrás (1 a 90).'}), zip_bloqueados_recientes),
+        H('cambios_de_configuracion_recientes', 'Cambios de semana, corte, años, exclusiones y carpetas de Drive, con sus alertas.',
+          _esq(dias={'type': 'integer', 'description': 'Días hacia atrás (1 a 90).'}), cambios_de_configuracion_recientes),
+        H('solicitudes_de_permiso_pendientes', 'Solicitudes de permiso que esperan respuesta: cuántas, de qué permiso y desde cuándo.',
+          _esq(), solicitudes_de_permiso_pendientes),
+        H('cobertura_de_responsables', 'Redes con y sin responsables guardados para los recordatorios.', _esq(), cobertura_de_responsables),
+        H('estado_salud_sistema', 'Última revisión de Salud del sistema, latido del proceso programado y último respaldo.',
+          _esq(), estado_salud_sistema),
     ]
 
 
